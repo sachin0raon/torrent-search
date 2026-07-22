@@ -1,0 +1,20 @@
+# Keep the build context small and free of secrets/artifacts.
+**/.venv
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.vite
+
+# Secrets & local state — never bake into the image.
+backend/.env
+backend/config.json
+
+# Repo/dev noise
+.git
+.gitignore
+**/.DS_Store
+docs
+README.md
+*.log

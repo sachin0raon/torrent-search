@@ -1,0 +1,70 @@
+"""Pydantic response schemas for the API."""
+from __future__ import annotations
+
+from pydantic import BaseModel
+
+
+# ---- Stage 1: TMDB search ----
+class TitleResult(BaseModel):
+    tmdb_id: int
+    media_type: str  # "movie" | "tv"
+    title: str
+    year: str | None = None
+    poster_url: str | None = None
+    overview: str | None = None
+
+
+class SearchResponse(BaseModel):
+    results: list[TitleResult]
+
+
+# ---- Stage 2: external ids ----
+class ExternalIdsResponse(BaseModel):
+    imdb_id: str | None = None
+
+
+# ---- Stage 3: streams (parallel fan-out) ----
+class TorrentioItem(BaseModel):
+    title: str
+    seeders: int | None = None
+    size: str | None = None
+    source: str | None = None
+    magnet: str
+
+
+class ForumSearchItem(BaseModel):
+    tid: int
+    title: str
+    topic_url: str
+
+
+class SourceResult(BaseModel):
+    ok: bool
+    error: str | None = None
+    items: list = []
+
+
+class StreamsResponse(BaseModel):
+    torrentio: SourceResult
+    forum: SourceResult
+
+
+# ---- Stage 4: forum topic links ----
+class TopicLink(BaseModel):
+    filename: str | None = None
+    file_url: str | None = None
+    magnet: str | None = None
+
+
+class TopicResponse(BaseModel):
+    links: list[TopicLink]
+
+
+# ---- Settings ----
+class ConfigResponse(BaseModel):
+    forum_base_url: str | None = None
+    source: str  # "config" | "env"
+
+
+class ConfigUpdate(BaseModel):
+    forum_base_url: str

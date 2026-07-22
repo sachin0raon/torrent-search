@@ -1,0 +1,36 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: torrent-search-aggregator:latest
+    ports:
+      - "8000:8000"
+    environment:
+      # Required: your TMDB API key (server-side only).
+      TMDB_API_KEY: ${TMDB_API_KEY:?set TMDB_API_KEY in your environment or a .env file}
+      # Default forum base URL; can be overridden at runtime from the UI Settings.
+      FORUM_BASE_URL: ${FORUM_BASE_URL:-}
+      # Application log verbosity (debug | info | warning | error).
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Retry policy for outbound API calls (retries 429/5xx + transport/timeout).
+      EXTERNAL_MAX_ATTEMPTS: ${EXTERNAL_MAX_ATTEMPTS:-3}
+      EXTERNAL_RETRY_DEADLINE: ${EXTERNAL_RETRY_DEADLINE:-15}
+    volumes:
+      # Persist the runtime forum-base-url override (config.json) across restarts.
+      - app_config:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+
+volumes:
+  app_config:
