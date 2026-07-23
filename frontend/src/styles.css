@@ -480,6 +480,16 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .toast-close { flex: none; color: var(--error-text); font-size: 13px; }
 .toast-close:hover { color: #fff; }
 
+/* Info variant (e.g. forum URL auto-updated) — distinct color, bottom-right. */
+.toast-wrap--info { top: auto; bottom: 20px; }
+.toast--info {
+  background: rgba(14, 26, 22, 0.75);
+  border-color: rgba(87, 217, 163, 0.32);
+  color: #bff0d8;
+}
+.toast--info .toast-msg { color: #d8ffe9; }
+.toast--info .toast-close { color: #bff0d8; }
+
 /* ---- Motion primitives ---- */
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(18px); filter: blur(6px); }

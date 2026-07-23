@@ -103,6 +103,32 @@ def test_streams_skips_torrentio_without_imdb(client):
     assert body["forum"]["items"][0]["topic_url"].endswith("/topic/5-a-title/")
 
 
+@respx.mock
+def test_streams_auto_updates_forum_base_on_redirect(client):
+    # Old domain 301-redirects to a new domain that serves valid search JSON.
+    respx.get(url__regex=r"https://forum\.tld/search/api/search\.php.*").mock(
+        return_value=httpx.Response(
+            301, headers={"Location": "https://new-forum.tld/search/api/search.php"}
+        )
+    )
+    respx.get(url__regex=r"https://new-forum\.tld/search/api/search\.php.*").mock(
+        return_value=httpx.Response(200, json={"results": [{"tid": 7, "title": "New Title"}]})
+    )
+
+    resp = client.get("/api/streams", params={"media_type": "movie", "raw_query": "x"})
+    body = resp.json()
+
+    assert body["forum_base_updated"] == "https://new-forum.tld"
+    assert body["forum"]["ok"] is True
+    # Topic URLs are rebuilt against the new origin.
+    assert body["forum"]["items"][0]["topic_url"].startswith("https://new-forum.tld/index.php")
+
+    # The new base URL is persisted (config source becomes "config").
+    cfg = client.get("/api/config").json()
+    assert cfg["forum_base_url"] == "https://new-forum.tld"
+    assert cfg["source"] == "config"
+
+
 def test_config_roundtrip(client):
     # Starts from env default.
     r = client.get("/api/config").json()

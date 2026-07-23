@@ -47,6 +47,9 @@ class SourceResult(BaseModel):
 class StreamsResponse(BaseModel):
     torrentio: SourceResult
     forum: SourceResult
+    # Set when a forum-domain redirect was detected and the base URL was
+    # auto-updated; the UI uses it to notify the user of the new URL.
+    forum_base_updated: str | None = None
 
 
 # ---- Stage 4: forum topic links ----

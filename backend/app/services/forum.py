@@ -18,7 +18,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from urllib.parse import parse_qs
+from typing import NamedTuple
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 from bs4 import BeautifulSoup
@@ -28,6 +29,18 @@ from app.models import ForumSearchItem, TopicLink
 from app.services.http import get_with_retry
 
 log = logging.getLogger("app.forum")
+
+
+class ForumSearchResult(NamedTuple):
+    items: list[ForumSearchItem]
+    # Origin (scheme://host) actually reached after any redirects — lets callers
+    # detect and persist a changed forum domain.
+    resolved_base_url: str
+
+
+def _origin(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else ""
 
 _SLUG_STRIP_RE = re.compile(r"[^a-z0-9\s-]")
 _SLUG_SPACE_RE = re.compile(r"\s+")
@@ -182,7 +195,7 @@ def _results_to_items(base_url: str, results: list[dict]) -> list[ForumSearchIte
 
 async def search(
     base_url: str, query: str, client: httpx.AsyncClient | None = None
-) -> list[ForumSearchItem]:
+) -> ForumSearchResult:
     url = f"{base_url.rstrip('/')}/search/api/search.php"
     params = {
         "q": query,
@@ -192,15 +205,21 @@ async def search(
         "per_page": 25,
     }
     owns_client = client is None
-    client = client or httpx.AsyncClient(timeout=OUTBOUND_TIMEOUT_SECONDS)
+    client = client or httpx.AsyncClient(
+        timeout=OUTBOUND_TIMEOUT_SECONDS, follow_redirects=True
+    )
     try:
         resp = await get_with_retry(client, url, params=params)
         resp.raise_for_status()
-        data = resp.json()
+        data = resp.json()  # valid JSON here confirms we reached the real forum
+        # Origin actually reached (after any 3xx redirects the client followed).
+        resolved = _origin(str(resp.url)) or base_url.rstrip("/")
     finally:
         if owns_client:
             await client.aclose()
-    return _results_to_items(base_url, data.get("results", []))
+    # Build topic URLs against the resolved origin so links work post-redirect.
+    items = _results_to_items(resolved, data.get("results", []))
+    return ForumSearchResult(items=items, resolved_base_url=resolved)
 
 
 async def fetch_topic(url: str, client: httpx.AsyncClient | None = None) -> list[TopicLink]:

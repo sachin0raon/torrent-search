@@ -7,7 +7,7 @@ import logging
 import httpx
 from fastapi import APIRouter, Query, Request
 
-from app.config import get_forum_base_url
+from app.config import ConfigError, get_forum_base_url, set_forum_base_url
 from app.models import SourceResult, StreamsResponse
 from app.services import forum, torrentio
 
@@ -42,18 +42,40 @@ async def _torrentio_source(
         return SourceResult(ok=False, error=_error_message(e), items=[])
 
 
-async def _forum_source(raw_query: str, client: httpx.AsyncClient) -> SourceResult:
+async def _forum_source(
+    raw_query: str, client: httpx.AsyncClient
+) -> tuple[SourceResult, str | None]:
+    """Returns (result, updated_base_url). updated_base_url is set when a forum
+    domain redirect was detected and the new base URL was persisted."""
     base_url, _ = get_forum_base_url()
     if not base_url:
         log.warning("forum search skipped: base URL not configured")
-        return SourceResult(ok=False, error="Forum base URL is not configured", items=[])
+        return SourceResult(ok=False, error="Forum base URL is not configured", items=[]), None
     try:
-        items = await forum.search(base_url, raw_query, client=client)
-        log.info("forum search %r ok: %d results", raw_query, len(items))
-        return SourceResult(ok=True, items=items)
+        result = await forum.search(base_url, raw_query, client=client)
+        updated = _maybe_persist_new_base(base_url, result.resolved_base_url)
+        log.info("forum search %r ok: %d results", raw_query, len(result.items))
+        return SourceResult(ok=True, items=result.items), updated
     except Exception as e:
         log.warning("forum search %r failed: %s", raw_query, _error_message(e))
-        return SourceResult(ok=False, error=_error_message(e), items=[])
+        return SourceResult(ok=False, error=_error_message(e), items=[]), None
+
+
+def _maybe_persist_new_base(current: str, resolved: str) -> str | None:
+    """If the reached origin differs from the configured base, persist it.
+
+    Only called after a valid search response, so `resolved` is a real forum
+    origin (not a parking/challenge page). Returns the saved URL, or None.
+    """
+    if not resolved or resolved.rstrip("/") == current.rstrip("/"):
+        return None
+    try:
+        saved = set_forum_base_url(resolved)
+    except ConfigError as e:
+        log.warning("Detected new forum URL %s but it failed validation: %s", resolved, e)
+        return None
+    log.info("Forum base URL auto-updated after redirect: %s -> %s", current, saved)
+    return saved
 
 
 @router.get("/streams", response_model=StreamsResponse)
@@ -67,8 +89,11 @@ async def streams(
 ):
     # Shared app-lifetime client; run both sources concurrently.
     client = request.app.state.http
-    torrentio_res, forum_res = await asyncio.gather(
+    torrentio_res, forum_pair = await asyncio.gather(
         _torrentio_source(imdb_id, media_type, season, episode, client),
         _forum_source(raw_query, client),
     )
-    return StreamsResponse(torrentio=torrentio_res, forum=forum_res)
+    forum_res, forum_updated = forum_pair
+    return StreamsResponse(
+        torrentio=torrentio_res, forum=forum_res, forum_base_updated=forum_updated
+    )

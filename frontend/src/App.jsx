@@ -21,6 +21,7 @@ export default function App() {
   const [lastStreamReq, setLastStreamReq] = useState(null); // params of the last /api/streams fetch, for retry
   const [loading, setLoading] = useState(''); // '', 'search', 'resolve', 'streams'
   const [error, setError] = useState('');
+  const [info, setInfo] = useState(''); // non-error notice (e.g. forum URL auto-updated)
   const [showSettings, setShowSettings] = useState(false);
   const [forumOnly, setForumOnly] = useState(false); // forum-only search (no TMDB title)
   const [tmdbFailed, setTmdbFailed] = useState(false); // last title search errored
@@ -31,6 +32,20 @@ export default function App() {
     const t = setTimeout(() => setError(''), 5000);
     return () => clearTimeout(t);
   }, [error]);
+
+  // Info notices linger a little longer (the forum URL is worth reading).
+  useEffect(() => {
+    if (!info) return undefined;
+    const t = setTimeout(() => setInfo(''), 7000);
+    return () => clearTimeout(t);
+  }, [info]);
+
+  // Surface an auto-updated forum base URL from any /api/streams response.
+  function noteForumUpdate(data) {
+    if (data && data.forum_base_updated) {
+      setInfo(`Forum URL auto-updated to ${data.forum_base_updated}`);
+    }
+  }
 
   function resetBelowSearch() {
     setTitles(null);
@@ -117,9 +132,12 @@ export default function App() {
             episode,
           }),
         ]);
+        noteForumUpdate(serverData);
         setStreams({ torrentio, forum: serverData.forum });
       } else {
-        setStreams(await serverPromise);
+        const serverData = await serverPromise;
+        noteForumUpdate(serverData);
+        setStreams(serverData);
       }
     } catch (e) {
       setError(e.message);
@@ -146,6 +164,7 @@ export default function App() {
     setLoading('streams');
     try {
       const data = await api.streams({ mediaType: 'movie', rawQuery: q });
+      noteForumUpdate(data);
       setStreams({ torrentio: null, forum: data.forum });
     } catch (e) {
       // Surface as an in-panel forum error so the Retry button stays available.
@@ -291,6 +310,7 @@ export default function App() {
         ) : null}
 
         <Toast message={error} onDismiss={() => setError('')} />
+        <Toast variant="info" message={info} onDismiss={() => setInfo('')} />
 
         <AnimatePresence>
           {showSettings ? (
