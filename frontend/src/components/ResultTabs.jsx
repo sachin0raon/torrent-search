@@ -18,7 +18,7 @@ function TorrentioRow({ item }) {
           </div>
         </div>
         <div className="actions">
-          <CopyButton value={item.magnet} />
+          <CopyButton value={item.magnet} className="" />
         </div>
       </div>
     </motion.div>

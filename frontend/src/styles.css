@@ -224,8 +224,9 @@ input:focus {
   margin: 26px auto 8px;
   animation: fade-up 0.8s var(--ease) both;
 }
-.search-bar input { flex: 1; border: none; background: transparent; padding-left: 12px; }
+.search-bar input { flex: 1; min-width: 0; border: none; background: transparent; padding-left: 12px; }
 .search-bar input:focus { background: transparent; }
+.search-bar button { flex: none; }
 
 .section-title {
   font-family: 'Space Grotesk', sans-serif;
@@ -420,7 +421,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .modal h2 { font-family: 'Space Grotesk', sans-serif; margin-top: 0; font-size: 18px; letter-spacing: -0.01em; }
 .modal .row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .modal .row input { border-radius: var(--radius-md); }
-.modal .actions { display: flex; justify-content: flex-end; gap: 10px; }
+.modal .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 .modal .source-note { color: var(--muted); font-size: 12px; }
 .modal-subtitle { font-family: 'Space Grotesk', sans-serif; font-size: 14px; letter-spacing: -0.01em; margin: 20px 0 10px; }
 .toggle-row { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; }
