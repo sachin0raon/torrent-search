@@ -22,6 +22,8 @@ export default function App() {
   const [loading, setLoading] = useState(''); // '', 'search', 'resolve', 'streams'
   const [error, setError] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [forumOnly, setForumOnly] = useState(false); // forum-only search (no TMDB title)
+  const [tmdbFailed, setTmdbFailed] = useState(false); // last title search errored
 
   // Auto-dismiss the error toast after a few seconds.
   useEffect(() => {
@@ -35,6 +37,9 @@ export default function App() {
     setSelected(null);
     setImdbId(undefined);
     setStreams(null);
+    setForumOnly(false);
+    setTmdbFailed(false);
+    setLastStreamReq(null);
     setError('');
   }
 
@@ -52,6 +57,9 @@ export default function App() {
       const data = await api.searchTitles(q);
       setTitles(data.results);
     } catch (e) {
+      // TMDB is down/unreachable, but the forum search only needs the raw query —
+      // surface a forum-only fallback rather than dead-ending.
+      setTmdbFailed(true);
       setError(e.message);
     } finally {
       setLoading('');
@@ -126,102 +134,170 @@ export default function App() {
     fetchStreams(title, imdb_id, { season, episode });
   }
 
+  // Forum-only search: no TMDB title / imdb_id needed. `media_type` is a required
+  // param on /api/streams, so we pass a placeholder; torrentio is skipped server-side
+  // (no imdb) and discarded here — only the forum half is shown.
+  async function searchForumOnly() {
+    const q = rawQuery.trim();
+    if (!q) return;
+    setSelected(null);
+    setForumOnly(true);
+    setStreams(null);
+    setLoading('streams');
+    try {
+      const data = await api.streams({ mediaType: 'movie', rawQuery: q });
+      setStreams({ torrentio: null, forum: data.forum });
+    } catch (e) {
+      // Surface as an in-panel forum error so the Retry button stays available.
+      setStreams({ torrentio: null, forum: { ok: false, error: e.message, items: [] } });
+    } finally {
+      setLoading('');
+    }
+  }
+
+  function backToSearch() {
+    setForumOnly(false);
+    setStreams(null);
+  }
+
   const isTvSelected = selected?.media_type === 'tv';
+
+  // Offer a forum-only search when TMDB errored or returned nothing for a query.
+  const showForumFallback =
+    !!rawQuery &&
+    !selected &&
+    !forumOnly &&
+    loading !== 'search' &&
+    (tmdbFailed || (Array.isArray(titles) && titles.length === 0));
 
   return (
     <MotionConfig reducedMotion="user">
-    <div className="container">
-      <header className="app-header">
-        <button
-          className="icon-btn"
-          onClick={() => setShowSettings(true)}
-          aria-label="Settings"
-          title="Settings"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
-            strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </button>
-      </header>
-
-      <section className="hero">
-        <span className="eyebrow">TMDB · Torrentio · Forum</span>
-        <h2>Find any torrent, beautifully.</h2>
-        <p>Search a movie or show, and we’ll gather sources side by side — with one-click magnet copy.</p>
-      </section>
-
-      <SearchBar onSearch={onSearch} disabled={loading === 'search'} />
-
-      {loading === 'search' ? <div className="spinner">Searching titles…</div> : null}
-
-      {/* Title list is hidden once a title is selected, so results sit right below. */}
-      <AnimatePresence mode="wait">
-        {titles && !selected ? (
-          <motion.div
-            key="titles"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
+      <div className="container">
+        <header className="app-header">
+          <button
+            className="icon-btn"
+            onClick={() => setShowSettings(true)}
+            aria-label="Settings"
+            title="Settings"
           >
-            <div className="section-title">Titles</div>
-            <TitleList results={titles} onSelect={onSelectTitle} selectedId={null} />
-          </motion.div>
-        ) : null}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
+              strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+        </header>
 
-        {selected ? (
-          <motion.div
-            key="selected"
-            variants={fadeUp}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            transition={spring}
-          >
-            <div className="section-title selected-bar">
-              <span className="selected-name">
-                {selected.title} {selected.year ? `(${selected.year})` : ''}
-              </span>
-              <button className="link" onClick={clearSelection}>
-                ← Change title
+        <section className="hero">
+          <span className="eyebrow">TMDB · Torrentio · Forum</span>
+          <h2>Find any torrent, magically.</h2>
+          <p>Search a movie or show, and we’ll gather sources side by side — with one-click magnet copy.</p>
+        </section>
+
+        <SearchBar onSearch={onSearch} disabled={loading === 'search'} />
+
+        {loading === 'search' ? <div className="spinner">Searching titles…</div> : null}
+
+        {/* Title list is hidden once a title is selected, so results sit right below. */}
+        <AnimatePresence mode="wait">
+          {titles && titles.length > 0 && !selected ? (
+            <motion.div
+              key="titles"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+            >
+              <div className="section-title">Titles</div>
+              <TitleList results={titles} onSelect={onSelectTitle} selectedId={null} />
+            </motion.div>
+          ) : null}
+
+          {selected ? (
+            <motion.div
+              key="selected"
+              variants={fadeUp}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              transition={spring}
+            >
+              <div className="section-title selected-bar">
+                <span className="selected-name">
+                  {selected.title} {selected.year ? `(${selected.year})` : ''}
+                </span>
+                <button className="link" onClick={clearSelection}>
+                  ← Change title
+                </button>
+              </div>
+
+              {loading === 'resolve' ? <div className="spinner">Resolving IMDb ID…</div> : null}
+
+              {imdbId === null ? (
+                <div className="notice">
+                  No IMDb ID found for this title — torrentio is skipped, but the forum search still runs.
+                </div>
+              ) : null}
+
+              {isTvSelected && loading !== 'resolve' ? (
+                <SeasonEpisodePicker onFetch={(se) => fetchStreams(selected, imdbId, se)} />
+              ) : null}
+
+              {loading === 'streams' ? <div className="spinner">Fetching torrents…</div> : null}
+
+              {streams ? (
+                <ResultTabs
+                  streams={streams}
+                  onRetry={retryStreams}
+                  retrying={loading === 'streams'}
+                />
+              ) : null}
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+
+        {/* TMDB failed or returned nothing — the forum doesn't need an IMDb ID,
+            so offer a direct forum search on the raw query. */}
+        {showForumFallback ? (
+          <div className="empty">
+            {tmdbFailed ? 'Title lookup failed.' : 'No matching titles found.'}{' '}
+            You can still search the forum directly.
+            <div style={{ marginTop: 14 }}>
+              <button onClick={searchForumOnly} disabled={loading === 'streams'}>
+                Search forum for “{rawQuery}”
               </button>
             </div>
+          </div>
+        ) : null}
 
-            {loading === 'resolve' ? <div className="spinner">Resolving IMDb ID…</div> : null}
-
-            {imdbId === null ? (
-              <div className="notice">
-                No IMDb ID found for this title — torrentio is skipped, but the forum search still runs.
-              </div>
-            ) : null}
-
-            {isTvSelected && loading !== 'resolve' ? (
-              <SeasonEpisodePicker onFetch={(se) => fetchStreams(selected, imdbId, se)} />
-            ) : null}
-
-            {loading === 'streams' ? <div className="spinner">Fetching torrents…</div> : null}
-
+        {forumOnly ? (
+          <div>
+            <div className="section-title selected-bar">
+              <span className="selected-name">Forum results for “{rawQuery}”</span>
+              <button className="link" onClick={backToSearch}>
+                ← New search
+              </button>
+            </div>
+            {loading === 'streams' ? <div className="spinner">Searching forum…</div> : null}
             {streams ? (
               <ResultTabs
                 streams={streams}
-                onRetry={retryStreams}
+                forumOnly
+                onRetry={searchForumOnly}
                 retrying={loading === 'streams'}
               />
             ) : null}
-          </motion.div>
+          </div>
         ) : null}
-      </AnimatePresence>
 
-      <Toast message={error} onDismiss={() => setError('')} />
+        <Toast message={error} onDismiss={() => setError('')} />
 
-      <AnimatePresence>
-        {showSettings ? (
-          <SettingsModal onClose={() => setShowSettings(false)} onSaved={() => {}} />
-        ) : null}
-      </AnimatePresence>
-    </div>
+        <AnimatePresence>
+          {showSettings ? (
+            <SettingsModal onClose={() => setShowSettings(false)} onSaved={() => { }} />
+          ) : null}
+        </AnimatePresence>
+      </div>
     </MotionConfig>
   );
 }

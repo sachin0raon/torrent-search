@@ -408,6 +408,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 16px;
 }
 .modal {
   background: rgba(18, 18, 21, 0.85);
@@ -416,6 +417,10 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   padding: 26px;
   width: 460px;
   max-width: 92vw;
+  /* Scroll internally on short viewports (landscape / keyboard open) so the
+     Save/Cancel actions stay reachable instead of overflowing off-screen. */
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
   box-shadow: var(--inset-hi), 0 30px 80px rgba(0, 0, 0, 0.6);
 }
 .modal h2 { font-family: 'Space Grotesk', sans-serif; margin-top: 0; font-size: 18px; letter-spacing: -0.01em; }

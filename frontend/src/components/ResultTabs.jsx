@@ -5,6 +5,16 @@ import ErrorBanner from './ErrorBanner.jsx';
 import ForumTopicRow from './ForumTopicRow.jsx';
 import { spring, staggerContainer, staggerItem } from '../motion.js';
 
+// Shared plain-glass retry control for per-source failures (Torrentio / Forum).
+function RetryButton({ onRetry, retrying }) {
+  if (!onRetry) return null;
+  return (
+    <button onClick={onRetry} disabled={retrying} style={{ marginTop: 2 }}>
+      {retrying ? 'Retrying…' : 'Retry'}
+    </button>
+  );
+}
+
 function TorrentioRow({ item }) {
   return (
     <motion.div className="result-row" variants={staggerItem} whileHover={{ y: -2 }}>
@@ -30,11 +40,7 @@ function TorrentioTab({ result, onRetry, retrying }) {
     return (
       <div>
         <ErrorBanner message={`Torrentio: ${result.error}`} />
-        {onRetry ? (
-          <button onClick={onRetry} disabled={retrying} style={{ marginTop: 2 }}>
-            {retrying ? 'Retrying…' : 'Retry'}
-          </button>
-        ) : null}
+        <RetryButton onRetry={onRetry} retrying={retrying} />
       </div>
     );
   }
@@ -50,9 +56,14 @@ function TorrentioTab({ result, onRetry, retrying }) {
   );
 }
 
-function ForumTab({ result }) {
+function ForumTab({ result, onRetry, retrying }) {
   if (!result.ok) {
-    return <ErrorBanner message={`Forum: ${result.error}`} />;
+    return (
+      <div>
+        <ErrorBanner message={`Forum: ${result.error}`} />
+        <RetryButton onRetry={onRetry} retrying={retrying} />
+      </div>
+    );
   }
   if (!result.items.length) {
     return <div className="empty">No forum results.</div>;
@@ -68,8 +79,15 @@ function ForumTab({ result }) {
   );
 }
 
-export default function ResultTabs({ streams, onRetry, retrying }) {
-  const [tab, setTab] = useState('torrentio');
+export default function ResultTabs({ streams, onRetry, retrying, forumOnly = false }) {
+  const [tab, setTab] = useState(forumOnly ? 'forum' : 'torrentio');
+
+  // Forum-only search (no title/imdb): render just the forum results — no
+  // Torrentio tab, since there's nothing to search it with.
+  if (forumOnly) {
+    return <ForumTab result={streams.forum} onRetry={onRetry} retrying={retrying} />;
+  }
+
   const tCount = streams.torrentio.ok ? streams.torrentio.items.length : 0;
   const fCount = streams.forum.ok ? streams.forum.items.length : 0;
 
