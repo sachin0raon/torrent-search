@@ -124,12 +124,16 @@ header.app-header {
 button {
   font: inherit;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--hairline);
   background: var(--glass-strong);
   color: var(--text);
   border-radius: 999px;
   padding: 10px 18px;
   font-weight: 500;
+  -webkit-tap-highlight-color: transparent;
   transition: transform 0.4s var(--ease), background 0.4s var(--ease),
     border-color 0.4s var(--ease), box-shadow 0.4s var(--ease);
   box-shadow: var(--inset-hi);
@@ -485,4 +489,22 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   .season-episode input { width: 100%; }
   .result-row .row-main { flex-wrap: wrap; }
   .result-row .actions { margin-left: 0; }
+
+  /* Forum link rows: filename on its own line, action buttons wrap below so
+     "Torrent file" + "Copy magnet" don't get crushed on narrow screens. */
+  .forum-link-row { flex-wrap: wrap; }
+  .forum-link-row .fname { flex-basis: 100%; }
+  .forum-link-row .actions { margin-left: 0; }
+}
+
+/* ---- Touch targets: enforce >=44px hit areas on touch devices (pointer:coarse
+   catches phones/tablets without penalizing desktop mouse users). ---- */
+@media (pointer: coarse) {
+  button:not(.link) { min-height: 44px; }
+  .tab { min-height: 44px; }
+  .icon-btn { width: 44px; height: 44px; }
+  input[type='text'], input[type='number'] { min-height: 44px; }
+  .toast-close { min-width: 44px; min-height: 44px; }
+  /* Rotate-on-hover sticks after tap on touch; keep the settings icon still. */
+  .icon-btn:hover { transform: none; }
 }

@@ -16,6 +16,7 @@ HTML pairing (per design):
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 
 import httpx
@@ -24,6 +25,8 @@ from bs4 import BeautifulSoup
 from app.config import OUTBOUND_TIMEOUT_SECONDS
 from app.models import ForumSearchItem, TopicLink
 from app.services.http import get_with_retry
+
+log = logging.getLogger("app.forum")
 
 _SLUG_STRIP_RE = re.compile(r"[^a-z0-9\s-]")
 _SLUG_SPACE_RE = re.compile(r"\s+")
@@ -119,6 +122,24 @@ def parse_topic_html(html: str) -> list[TopicLink]:
     for i, (kind, data) in enumerate(seq):
         if kind == "magnet" and i not in claimed:
             links.append(TopicLink(filename=None, file_url=None, magnet=data["magnet"]))
+
+    # Debug view of the exact file/magnet interleaving so mispairings on a real
+    # page can be diagnosed without guessing (enable with LOG_LEVEL=debug).
+    if log.isEnabledFor(logging.DEBUG):
+        order = [
+            ("F:" + (d["filename"][:28] if d.get("filename") else "?"))
+            if k == "file"
+            else ("M:" + d["magnet"][:24])
+            for k, d in seq
+        ]
+        log.debug("topic anchor order (%d): %s", len(seq), order)
+        log.debug(
+            "topic parsed: %d rows, %d files, %d magnets, %d magnet-only(unnamed)",
+            len(links),
+            sum(1 for k, _ in seq if k == "file"),
+            sum(1 for k, _ in seq if k == "magnet"),
+            sum(1 for l in links if l.filename is None),
+        )
 
     return links
 

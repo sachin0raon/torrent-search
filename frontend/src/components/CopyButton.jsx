@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 // Copies a magnet link to the clipboard and shows a transient "Copied" state.
-export default function CopyButton({ value, label = 'Copy magnet' }) {
+export default function CopyButton({ value, label = 'Copy magnet', className = 'btn-solid' }) {
   const [copied, setCopied] = useState(false);
 
   async function onCopy() {
@@ -15,7 +15,7 @@ export default function CopyButton({ value, label = 'Copy magnet' }) {
   }
 
   return (
-    <button className="btn-solid" onClick={onCopy} disabled={!value}>
+    <button className={className} onClick={onCopy} disabled={!value}>
       {copied ? 'Copied ✓' : label}
     </button>
   );

@@ -78,7 +78,7 @@ export default function ForumTopicRow({ item }) {
             <div className="forum-links">
               {loading ? <div className="spinner">Loading links…</div> : null}
               {links && links.length === 0 && !loading ? (
-                <div className="empty">No links found on topic page.</div>
+                <div className="empty">No torrent or magnet links found on topic page.</div>
               ) : null}
               {links &&
                 links.map((l, i) => (
@@ -91,7 +91,7 @@ export default function ForumTopicRow({ item }) {
                         </a>
                       ) : null}
                       {l.magnet ? (
-                        <CopyButton value={l.magnet} />
+                        <CopyButton value={l.magnet} className="" />
                       ) : (
                         <span className="notice">no magnet</span>
                       )}
