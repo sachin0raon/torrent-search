@@ -7,8 +7,17 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design, assumptions, and decis
 
 - **Backend:** FastAPI (Python 3.11+), async httpx, BeautifulSoup4 — proxies TMDB,
   torrentio, and a configurable forum site; parses streams/HTML; builds magnets.
-- **Frontend:** React (Vite) SPA — thin renderer, tabbed results (Torrentio / Forum).
+- **Frontend:** React (Vite) SPA — thin renderer, tabbed results (Torrentio / Forum),
+  with a per-browser toggle to fetch Torrentio client-side or server-side.
 - Local single-user, no auth.
+
+> **Torrentio source (client vs server).** Torrentio sits behind Cloudflare, which
+> can reject a server's datacenter IP with a `403` (common on VPS deployments). The
+> UI ⚙️ Settings has a toggle — **client** mode fetches Torrentio directly from the
+> browser (your residential IP, bypassing that block), while **server** mode uses
+> the backend. When a Torrentio call fails, a **Retry** button re-runs it in the
+> currently selected mode. Both paths use the same retry policy (3 attempts,
+> exponential backoff + jitter, retrying 429/5xx/network but not `403`).
 
 ## Prerequisites
 
@@ -50,6 +59,7 @@ Open http://localhost:5173.
 | `TMDB_API_KEY` | `backend/.env` | Server-side only; never sent to the browser. |
 | `FORUM_BASE_URL` | `backend/.env` | Default forum base URL. |
 | Forum base URL override | UI ⚙️ Settings | Persisted to `backend/config.json`; overrides the `.env` default and survives restarts. |
+| Torrentio source (client/server) | UI ⚙️ Settings | Persisted per-browser in `localStorage` (key `torrentioMode`, default **client**). Client fetches Torrentio from the browser to avoid server-side Cloudflare `403`s; server uses the backend. |
 
 ## Run with Docker
 
@@ -87,7 +97,7 @@ Notes:
 ## Tests
 
 ```bash
-# Backend (39 tests)
+# Backend (48 tests)
 cd backend && .venv/bin/python -m pytest -q
 
 # Frontend (9 tests)
@@ -109,6 +119,12 @@ cd frontend && npm test
    torrentio skipped, forum still runs.
 7. **Config persistence:** set a forum base URL in Settings → restart backend →
    value is retained (read from `config.json`).
+8. **Torrentio source toggle:** in ⚙️ Settings switch between client/server →
+   re-run a search → Torrentio results still appear; the choice persists across
+   reloads (browser `localStorage`).
+9. **Retry:** when the Torrentio tab shows an error, click **Retry** → it re-runs
+   in the current mode (works with a mode switch in between, e.g. server 403 →
+   flip to client → Retry succeeds).
 
 ## Project layout
 

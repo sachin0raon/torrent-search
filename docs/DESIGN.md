@@ -2,6 +2,11 @@
 
 > Status: **Design approved** (brainstorming complete). Ready for implementation handoff.
 > Date: 2026-07-23
+>
+> **Update (2026-07-23):** added a per-browser **client/server Torrentio fetch toggle**
+> (client mode calls torrentio.strem.fun directly from the browser to bypass
+> datacenter-IP `403`s behind Cloudflare) and a **Retry** action on Torrentio
+> failures. See Decision Log #15 and §4.2a.
 
 ---
 
@@ -48,6 +53,8 @@
 | 12 | No E2E (Playwright) for v1 | Full E2E suite | YAGNI for local tool; unit tests cover parsing risk |
 | 13 | UI visual style: dark theme (blue accent, card rows) | Light theme; light/dark toggle | User confirmed; sensible default for a media tool |
 | 14 | UI layout: single-page vertical wizard | Two-pane list+detail; results modal | User confirmed; simplest linear flow matching the staged data |
+| 15 | Torrentio fetch: per-browser **client/server toggle** (default client), persisted in `localStorage` | Server-only (original); always client | VPS/datacenter IPs get Cloudflare `403`; client mode uses the browser's residential IP. Backend left untouched — client mode still calls `/api/streams` for Forum and discards the server's Torrentio half. Client fetch mirrors the server retry policy (3 attempts, exp backoff + jitter). |
+| 16 | **Retry** button on Torrentio failure; re-runs in the currently selected mode | Auto-retry only; full re-search | Covers transient blips and lets a user flip server→client then retry without re-searching |
 
 ---
 
@@ -59,10 +66,12 @@ Two processes over HTTP on localhost:
 
 ```
 React (Vite) SPA :5173  ⇄  FastAPI backend :8000
-                            outbound (httpx async):
-                             • TMDB API
-                             • torrentio.strem.fun
-                             • forum base URL (configurable)
+        │                   outbound (httpx async):
+        │                    • TMDB API
+        │                    • torrentio.strem.fun
+        │                    • forum base URL (configurable)
+        └─────────────────► torrentio.strem.fun     (client mode only; browser's
+                                                      residential IP, CORS: allow-*)
 ```
 
 **Backend layout (`backend/`):**
@@ -86,9 +95,12 @@ tests/               # pytest — parsing/magnet/slug logic + fixtures
 config.json          # persisted forum base URL override (gitignored)
 ```
 
-**Frontend layout (`frontend/`):** Vite React app — `api/client.js` (fetch wrapper),
-`components/` (SearchBar, TitleList, SeasonEpisodePicker, ResultTabs, TorrentioTab,
-ForumTab, ForumTopicRow, SettingsModal), `App.jsx` orchestrating the wizard.
+**Frontend layout (`frontend/`):** Vite React app — `api/client.js` (backend fetch
+wrapper), `api/torrentio.js` (client-side Torrentio fetch/parse/magnet, mirrors the
+backend service), `torrentioMode.js` (client/server toggle persisted in
+`localStorage`), `components/` (SearchBar, TitleList, SeasonEpisodePicker, ResultTabs,
+TorrentioTab, ForumTab, ForumTopicRow, CopyButton, SettingsModal), `App.jsx`
+orchestrating the wizard.
 
 **Config precedence:** `config.json` value (if present & non-empty) → else `FORUM_BASE_URL` from `.env`. Re-read per request (cheap, always fresh).
 
@@ -102,7 +114,10 @@ ForumTab, ForumTopicRow, SettingsModal), `App.jsx` orchestrating the wizard.
   advances: search bar → title cards (with posters) → season/episode inputs (TV only)
   → tabbed results (Torrentio / Forum) → result rows with copy-magnet.
 - **Feedback:** inline spinners per stage, dismissible per-source error banners,
-  transient "Copied ✓" on magnet copy, and a notice when a title has no IMDb ID.
+  a **Retry** button on Torrentio failures, transient "Copied ✓" on magnet copy,
+  and a notice when a title has no IMDb ID.
+- **Responsive/touch:** ≥44px touch targets on coarse-pointer devices, and result/
+  forum-link rows reflow (wrap) under 768px so action buttons aren't crushed.
 
 ### 4.2 Data Flow & Endpoints
 
@@ -128,6 +143,29 @@ Response:
 **Stage 4 — Forum topic expand (lazy):** `GET /api/forum/topic?url={topic_url}` → fetch HTML, parse paired file/magnet links → `[{filename, file_url, magnet}]`.
 
 **Timeouts:** every outbound call ~10s; timeout → that source's `error`.
+
+### 4.2a Torrentio source mode (client vs server) & retry
+
+A per-browser toggle in ⚙️ Settings (persisted in `localStorage`, key `torrentioMode`,
+default **client**) selects where Torrentio is fetched:
+
+- **server** — original flow: `/api/streams` returns both Torrentio and Forum.
+- **client** — the browser fetches Torrentio directly from `torrentio.strem.fun`
+  (works because it sends `access-control-allow-origin: *`) using the visitor's
+  residential IP, sidestepping the Cloudflare `403` that a datacenter/VPS IP hits.
+  The frontend still calls `/api/streams` for the **Forum** half and **discards the
+  server's Torrentio result**, so the backend is unchanged. The two halves are merged
+  client-side into the same `{ torrentio, forum }` shape.
+
+`api/torrentio.js` mirrors `services/torrentio.py`: same URL building, title parsing,
+and `quote_plus`-identical magnet construction, so client- and server-built magnets
+match byte-for-byte. Its retry policy mirrors the backend — **3 attempts, exponential
+backoff + jitter** (base 0.3s, cap 3s), overall 15s budget, retrying `429`/`5xx`/network
+but **not** `403`.
+
+**Retry:** when the Torrentio tab shows an error (either mode), a **Retry** button
+re-runs the fetch. The mode is read at click time, so a user can flip server→client
+in Settings and retry without re-searching.
 
 ### 4.3 Parsing & Magnet Logic
 
@@ -187,4 +225,4 @@ Topic URL: `{base}/index.php?/topic/{tid}-{slug}/`
 
 **Fixtures:** real samples in `tests/fixtures/` (torrentio JSON, forum search JSON, saved topic HTML) for offline deterministic tests.
 
-**Manual smoke checklist:** search → pick movie → copy magnet; pick TV with/without episode; expand forum topic; break base URL → see error banner.
+**Manual smoke checklist:** search → pick movie → copy magnet; pick TV with/without episode; expand forum topic; break base URL → see error banner; toggle Torrentio client/server in Settings (persists across reloads); on a Torrentio failure use **Retry** (including server→client flip then retry).

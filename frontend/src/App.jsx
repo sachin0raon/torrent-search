@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { api } from './api/client.js';
+import * as clientTorrentio from './api/torrentio.js';
+import { getTorrentioMode } from './torrentioMode.js';
 import SearchBar from './components/SearchBar.jsx';
 import TitleList from './components/TitleList.jsx';
 import SeasonEpisodePicker from './components/SeasonEpisodePicker.jsx';
@@ -16,6 +18,7 @@ export default function App() {
   const [selected, setSelected] = useState(null); // TitleResult
   const [imdbId, setImdbId] = useState(undefined); // undefined=unknown, null=absent
   const [streams, setStreams] = useState(null);
+  const [lastStreamReq, setLastStreamReq] = useState(null); // params of the last /api/streams fetch, for retry
   const [loading, setLoading] = useState(''); // '', 'search', 'resolve', 'streams'
   const [error, setError] = useState('');
   const [showSettings, setShowSettings] = useState(false);
@@ -80,21 +83,47 @@ export default function App() {
   }
 
   async function fetchStreams(title, imdb_id, { season, episode }) {
+    // Remember the request so the Torrentio "Retry" button can re-run the same
+    // combined /api/streams fetch without needing the picker again.
+    setLastStreamReq({ title, imdb_id, season, episode });
     setLoading('streams');
     try {
-      const data = await api.streams({
+      const serverPromise = api.streams({
         imdbId: imdb_id ?? undefined,
         mediaType: title.media_type,
         rawQuery,
         season,
         episode,
       });
-      setStreams(data);
+
+      if (getTorrentioMode() === 'client') {
+        // Client mode: fetch Torrentio from the browser (residential IP) and take
+        // Forum from the backend's combined response. The server still runs its
+        // own Torrentio call, but we discard it — this keeps the backend untouched.
+        const [serverData, torrentio] = await Promise.all([
+          serverPromise,
+          clientTorrentio.fetchStreams({
+            imdbId: imdb_id ?? undefined,
+            mediaType: title.media_type,
+            season,
+            episode,
+          }),
+        ]);
+        setStreams({ torrentio, forum: serverData.forum });
+      } else {
+        setStreams(await serverPromise);
+      }
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading('');
     }
+  }
+
+  function retryStreams() {
+    if (!lastStreamReq) return;
+    const { title, imdb_id, season, episode } = lastStreamReq;
+    fetchStreams(title, imdb_id, { season, episode });
   }
 
   const isTvSelected = selected?.media_type === 'tv';
@@ -174,7 +203,13 @@ export default function App() {
 
             {loading === 'streams' ? <div className="spinner">Fetching torrents…</div> : null}
 
-            {streams ? <ResultTabs streams={streams} /> : null}
+            {streams ? (
+              <ResultTabs
+                streams={streams}
+                onRetry={retryStreams}
+                retrying={loading === 'streams'}
+              />
+            ) : null}
           </motion.div>
         ) : null}
       </AnimatePresence>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { api } from '../api/client.js';
 import ErrorBanner from './ErrorBanner.jsx';
+import { getTorrentioMode, setTorrentioMode } from '../torrentioMode.js';
 import { spring } from '../motion.js';
 
 // Edit the configurable forum base URL. Reads current value (env or config)
@@ -11,6 +12,15 @@ export default function SettingsModal({ onClose, onSaved }) {
   const [source, setSource] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [torrentioMode, setTorrentioModeState] = useState(getTorrentioMode());
+
+  // Persist the Torrentio source toggle immediately (it's client-only, so it
+  // takes effect on the next search regardless of the forum-URL Save button).
+  function onToggleMode(e) {
+    const mode = e.target.checked ? 'client' : 'server';
+    setTorrentioModeState(mode);
+    setTorrentioMode(mode);
+  }
 
   useEffect(() => {
     let active = true;
@@ -71,6 +81,21 @@ export default function SettingsModal({ onClose, onSaved }) {
             Current source: {source || 'unknown'}
           </span>
         </div>
+        <h2 className="modal-subtitle">Torrentio source</h2>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={torrentioMode === 'client'}
+            onChange={onToggleMode}
+          />
+          <span>Fetch Torrentio directly in my browser</span>
+        </label>
+        <span className="source-note">
+          {torrentioMode === 'client'
+            ? 'Client-side: uses your home IP. Best when the server is blocked (403).'
+            : 'Server-side: the backend fetches Torrentio.'}
+        </span>
+
         <ErrorBanner message={error} onDismiss={() => setError('')} />
         <div className="actions">
           <button onClick={onClose}>Cancel</button>

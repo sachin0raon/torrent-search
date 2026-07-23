@@ -422,6 +422,9 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .modal .row input { border-radius: var(--radius-md); }
 .modal .actions { display: flex; justify-content: flex-end; gap: 10px; }
 .modal .source-note { color: var(--muted); font-size: 12px; }
+.modal-subtitle { font-family: 'Space Grotesk', sans-serif; font-size: 14px; letter-spacing: -0.01em; margin: 20px 0 10px; }
+.toggle-row { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; }
+.toggle-row input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; flex: none; }
 .copied { color: var(--ok); font-size: 12px; }
 
 /* ---- Season/episode ---- */

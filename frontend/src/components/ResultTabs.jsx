@@ -25,9 +25,18 @@ function TorrentioRow({ item }) {
   );
 }
 
-function TorrentioTab({ result }) {
+function TorrentioTab({ result, onRetry, retrying }) {
   if (!result.ok) {
-    return <ErrorBanner message={`Torrentio: ${result.error}`} />;
+    return (
+      <div>
+        <ErrorBanner message={`Torrentio: ${result.error}`} />
+        {onRetry ? (
+          <button onClick={onRetry} disabled={retrying} style={{ marginTop: 2 }}>
+            {retrying ? 'Retrying…' : 'Retry'}
+          </button>
+        ) : null}
+      </div>
+    );
   }
   if (!result.items.length) {
     return <div className="empty">No torrentio results.</div>;
@@ -59,7 +68,7 @@ function ForumTab({ result }) {
   );
 }
 
-export default function ResultTabs({ streams }) {
+export default function ResultTabs({ streams, onRetry, retrying }) {
   const [tab, setTab] = useState('torrentio');
   const tCount = streams.torrentio.ok ? streams.torrentio.items.length : 0;
   const fCount = streams.forum.ok ? streams.forum.items.length : 0;
@@ -94,7 +103,7 @@ export default function ResultTabs({ streams }) {
         transition={spring}
       >
         {tab === 'torrentio' ? (
-          <TorrentioTab result={streams.torrentio} />
+          <TorrentioTab result={streams.torrentio} onRetry={onRetry} retrying={retrying} />
         ) : (
           <ForumTab result={streams.forum} />
         )}
