@@ -75,8 +75,8 @@ def test_parse_topic_pairs_and_edges():
     assert links[2].filename == "Movie.Three.480p.torrent"
     assert links[2].magnet.startswith("magnet:?xt=urn:btih:HASH3")
 
-    # Stray magnet -> filename None.
-    assert links[3].filename is None
+    # Stray magnet -> named from its `dn` parameter (dn=Stray in the fixture).
+    assert links[3].filename == "Stray"
     assert links[3].magnet.startswith("magnet:?xt=urn:btih:HASH_STRAY")
 
 
@@ -142,6 +142,28 @@ def test_parse_topic_image_before_magnet_does_not_steal():
     assert len(links) == 1
     assert links[0].filename == "Show.torrent"
     assert links[0].magnet.endswith("H6")
+
+
+def test_parse_topic_magnet_only_named_from_dn():
+    # Real case: server HTML has only magnet links (attachment links are JS-loaded).
+    # Each magnet should be named from its url-encoded `dn` parameter.
+    html = (
+        '<a href="magnet:?xt=urn:btih:55c0&amp;dn=Murder%20Mystery%20%282019%29%201080p">m1</a>'
+        '<a href="magnet:?xt=urn:btih:5c5c&amp;dn=Another.Movie.2020.720p">m2</a>'
+    )
+    links = parse_topic_html(html)
+    assert len(links) == 2
+    assert links[0].filename == "Murder Mystery (2019) 1080p"
+    assert links[0].file_url is None
+    assert links[0].magnet.startswith("magnet:?xt=urn:btih:55c0")
+    assert links[1].filename == "Another.Movie.2020.720p"
+
+
+def test_parse_topic_magnet_without_dn_stays_unnamed():
+    links = parse_topic_html('<a href="magnet:?xt=urn:btih:abcd">m</a>')
+    assert len(links) == 1
+    assert links[0].filename is None
+    assert links[0].magnet.startswith("magnet:?xt=urn:btih:abcd")
 
 
 def test_parse_topic_no_links():

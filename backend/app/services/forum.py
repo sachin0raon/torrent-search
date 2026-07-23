@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from urllib.parse import parse_qs
 
 import httpx
 from bs4 import BeautifulSoup
@@ -51,6 +52,20 @@ def build_topic_url(base_url: str, tid: int, title: str) -> str:
 
 # Attachment-link classes for torrent files (per spec: ipsAttachLink / _block).
 _ATTACH_CLASSES = frozenset({"ipsAttachLink", "ipsAttachLink_block"})
+
+
+def magnet_display_name(magnet: str) -> str | None:
+    """Extract a human-readable name from a magnet URI's `dn` parameter.
+
+    Many forum posts render only the magnet link (the .torrent attachment link
+    is added client-side by JS and isn't in the server HTML). The magnet's `dn`
+    carries the release name, so we use it to label otherwise-unnamed magnets.
+    """
+    query = magnet.split("?", 1)[1] if "?" in magnet else ""
+    values = parse_qs(query).get("dn")  # parse_qs already url-decodes values
+    if values and values[0].strip():
+        return values[0].strip()
+    return None
 
 
 def _is_torrent_file_link(tag) -> bool:
@@ -114,14 +129,22 @@ def parse_topic_html(html: str) -> list[TopicLink]:
         elif i - 1 >= 0 and seq[i - 1][0] == "magnet" and (i - 1) not in claimed:
             magnet = seq[i - 1][1]["magnet"]
             claimed.add(i - 1)
+        # Fall back to the magnet's `dn` name if the file link had no text.
+        filename = data["filename"] or (magnet_display_name(magnet) if magnet else None)
         links.append(
-            TopicLink(filename=data["filename"], file_url=data["file_url"], magnet=magnet)
+            TopicLink(filename=filename, file_url=data["file_url"], magnet=magnet)
         )
 
-    # Any magnet not paired with a file becomes its own row, in document order.
+    # Any magnet not paired with a file becomes its own row, named from its `dn`.
     for i, (kind, data) in enumerate(seq):
         if kind == "magnet" and i not in claimed:
-            links.append(TopicLink(filename=None, file_url=None, magnet=data["magnet"]))
+            links.append(
+                TopicLink(
+                    filename=magnet_display_name(data["magnet"]),
+                    file_url=None,
+                    magnet=data["magnet"],
+                )
+            )
 
     # Debug view of the exact file/magnet interleaving so mispairings on a real
     # page can be diagnosed without guessing (enable with LOG_LEVEL=debug).
