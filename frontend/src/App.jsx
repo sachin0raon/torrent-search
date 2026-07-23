@@ -17,6 +17,7 @@ export default function App() {
   const [titles, setTitles] = useState(null);
   const [selected, setSelected] = useState(null); // TitleResult
   const [imdbId, setImdbId] = useState(undefined); // undefined=unknown, null=absent
+  const [seasons, setSeasons] = useState(null); // TMDB seasons for the selected TV show
   const [streams, setStreams] = useState(null);
   const [lastStreamReq, setLastStreamReq] = useState(null); // params of the last /api/streams fetch, for retry
   const [loading, setLoading] = useState(''); // '', 'search', 'resolve', 'streams'
@@ -51,6 +52,7 @@ export default function App() {
     setTitles(null);
     setSelected(null);
     setImdbId(undefined);
+    setSeasons(null);
     setStreams(null);
     setForumOnly(false);
     setTmdbFailed(false);
@@ -62,6 +64,7 @@ export default function App() {
     setSelected(null);
     setStreams(null);
     setImdbId(undefined);
+    setSeasons(null);
   }
 
   async function onSearch(q) {
@@ -85,16 +88,29 @@ export default function App() {
     setSelected(title);
     setStreams(null);
     setImdbId(undefined);
+    setSeasons(null);
     setLoading('resolve');
 
     // Resolve imdb_id, but tolerate failure: the forum search only needs the raw
     // query, so we still fetch streams (torrentio is simply skipped without an id).
+    // For TV, fetch the season/episode list in parallel to populate the dropdowns.
     let imdb = null;
-    try {
-      const res = await api.externalIds(title.media_type, title.tmdb_id);
-      imdb = res.imdb_id;
-    } catch (e) {
-      setError(`Couldn't resolve IMDb ID: ${e.message}. Torrentio skipped; forum search will still run.`);
+    if (title.media_type === 'tv') {
+      const [idRes, seasonsRes] = await Promise.allSettled([
+        api.externalIds(title.media_type, title.tmdb_id),
+        api.tvSeasons(title.tmdb_id),
+      ]);
+      if (idRes.status === 'fulfilled') imdb = idRes.value.imdb_id;
+      else setError(`Couldn't resolve IMDb ID: ${idRes.reason.message}. Torrentio skipped; forum search will still run.`);
+      // If seasons fetch fails, leave null -> the picker falls back to manual inputs.
+      if (seasonsRes.status === 'fulfilled') setSeasons(seasonsRes.value.seasons);
+    } else {
+      try {
+        const res = await api.externalIds(title.media_type, title.tmdb_id);
+        imdb = res.imdb_id;
+      } catch (e) {
+        setError(`Couldn't resolve IMDb ID: ${e.message}. Torrentio skipped; forum search will still run.`);
+      }
     }
     setImdbId(imdb);
     setLoading('');
@@ -259,7 +275,10 @@ export default function App() {
               ) : null}
 
               {isTvSelected && loading !== 'resolve' ? (
-                <SeasonEpisodePicker onFetch={(se) => fetchStreams(selected, imdbId, se)} />
+                <SeasonEpisodePicker
+                  seasons={seasons}
+                  onFetch={(se) => fetchStreams(selected, imdbId, se)}
+                />
               ) : null}
 
               {loading === 'streams' ? <div className="spinner">Fetching torrents…</div> : null}

@@ -36,6 +36,9 @@ export const api = {
   externalIds: (mediaType, tmdbId, signal) =>
     request(`/api/external-ids?${qs({ media_type: mediaType, tmdb_id: tmdbId })}`, { signal }),
 
+  tvSeasons: (tmdbId, signal) =>
+    request(`/api/tv-seasons?${qs({ tmdb_id: tmdbId })}`, { signal }),
+
   streams: ({ imdbId, mediaType, rawQuery, season, episode }, signal) =>
     request(
       `/api/streams?${qs({

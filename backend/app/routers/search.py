@@ -6,7 +6,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.config import ConfigError
-from app.models import ExternalIdsResponse, SearchResponse
+from app.models import ExternalIdsResponse, SearchResponse, TvSeasonsResponse
 from app.services import tmdb
 
 log = logging.getLogger("app.search")
@@ -43,3 +43,17 @@ async def external_ids(
         raise HTTPException(status_code=502, detail=f"TMDB external_ids failed: {e}")
     log.info("external_ids %s/%s -> imdb_id=%s", media_type, tmdb_id, imdb_id)
     return ExternalIdsResponse(imdb_id=imdb_id)
+
+
+@router.get("/tv-seasons", response_model=TvSeasonsResponse)
+async def tv_seasons(request: Request, tmdb_id: int = Query(...)):
+    try:
+        seasons = await tmdb.tv_seasons(tmdb_id, client=request.app.state.http)
+    except ConfigError as e:
+        log.error("TMDB tv_seasons misconfigured: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        log.exception("TMDB tv_seasons failed for %s", tmdb_id)
+        raise HTTPException(status_code=502, detail=f"TMDB tv_seasons failed: {e}")
+    log.info("tv_seasons %s -> %d seasons", tmdb_id, len(seasons))
+    return TvSeasonsResponse(seasons=seasons)

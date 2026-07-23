@@ -50,6 +50,30 @@ def test_search_filters_person(client):
 
 
 @respx.mock
+def test_tv_seasons(client):
+    respx.get("https://api.themoviedb.org/3/tv/99/external_ids")  # not used, just registered
+    respx.get("https://api.themoviedb.org/3/tv/99").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "seasons": [
+                    {"season_number": 0, "name": "Specials", "episode_count": 3},
+                    {"season_number": 1, "name": "Season 1", "episode_count": 10},
+                    {"season_number": 2, "name": "Season 2", "episode_count": 8},
+                    {"season_number": 3, "name": "Future", "episode_count": 0},  # dropped
+                ]
+            },
+        )
+    )
+    resp = client.get("/api/tv-seasons", params={"tmdb_id": 99})
+    assert resp.status_code == 200
+    seasons = resp.json()["seasons"]
+    # Season 3 (0 episodes) dropped; sorted by number.
+    assert [s["season_number"] for s in seasons] == [0, 1, 2]
+    assert seasons[1] == {"season_number": 1, "name": "Season 1", "episode_count": 10}
+
+
+@respx.mock
 def test_external_ids(client):
     respx.get("https://api.themoviedb.org/3/movie/42/external_ids").mock(
         return_value=httpx.Response(200, json={"imdb_id": "tt0042"})

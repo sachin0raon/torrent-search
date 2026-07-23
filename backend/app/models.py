@@ -23,6 +23,17 @@ class ExternalIdsResponse(BaseModel):
     imdb_id: str | None = None
 
 
+# ---- TV seasons (for season/episode dropdowns) ----
+class TvSeason(BaseModel):
+    season_number: int
+    name: str | None = None
+    episode_count: int
+
+
+class TvSeasonsResponse(BaseModel):
+    seasons: list[TvSeason]
+
+
 # ---- Stage 3: streams (parallel fan-out) ----
 class TorrentioItem(BaseModel):
     title: str

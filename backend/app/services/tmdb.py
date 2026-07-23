@@ -7,7 +7,7 @@ from __future__ import annotations
 import httpx
 
 from app.config import OUTBOUND_TIMEOUT_SECONDS, get_tmdb_api_key
-from app.models import TitleResult
+from app.models import TitleResult, TvSeason
 from app.services.http import get_with_retry
 
 TMDB_BASE = "https://api.themoviedb.org/3"
@@ -71,3 +71,32 @@ async def external_ids(
             await client.aclose()
     imdb_id = (data.get("imdb_id") or "").strip()
     return imdb_id or None
+
+
+async def tv_seasons(tmdb_id: int, client: httpx.AsyncClient | None = None) -> list[TvSeason]:
+    """Return the seasons of a TV show (each with its episode_count).
+
+    A single /tv/{id} call includes the `seasons` array with episode_count per
+    season, so no per-season fetch is needed. Seasons with no episodes are dropped.
+    """
+    url = f"{TMDB_BASE}/tv/{tmdb_id}"
+    params = {"api_key": get_tmdb_api_key()}
+    owns_client = client is None
+    client = client or httpx.AsyncClient(timeout=OUTBOUND_TIMEOUT_SECONDS)
+    try:
+        resp = await get_with_retry(client, url, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+    finally:
+        if owns_client:
+            await client.aclose()
+
+    seasons: list[TvSeason] = []
+    for s in data.get("seasons", []):
+        count = s.get("episode_count") or 0
+        number = s.get("season_number")
+        if count <= 0 or number is None:
+            continue
+        seasons.append(TvSeason(season_number=number, name=s.get("name"), episode_count=count))
+    seasons.sort(key=lambda s: s.season_number)
+    return seasons
