@@ -15,7 +15,23 @@ const REQUEST_TIMEOUT_MS = 15000; // overall budget across attempts (server dead
 // exponential backoff + jitter, capped. Same retryable set as the server.
 const RETRY = { attempts: 3, baseMs: 300, capMs: 3000, jitterMs: 500 };
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Abortable sleep: rejects with AbortError if `signal` fires, so a backoff wait
+// can't push the total past the overall timeout budget.
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const abortError = () => signal?.reason ?? new DOMException('Aborted', 'AbortError');
+    if (signal?.aborted) return reject(abortError());
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(t);
+        reject(abortError());
+      },
+      { once: true },
+    );
+  });
+}
 
 // Backoff before the next attempt: exponential growth off baseMs, capped, plus
 // a random jitter in [0, jitterMs). `attempt` is the 0-based index just completed.
@@ -125,8 +141,9 @@ async function fetchJson(url, signal) {
       if (e?.name === 'AbortError' || e?.status) throw e; // abort / non-retryable status
       lastErr = e; // network error -> fall through to backoff/retry
     }
-    // Wait before the next attempt (skip after the final one).
-    if (attempt < RETRY.attempts - 1) await sleep(backoffMs(attempt));
+    // Wait before the next attempt (skip after the final one). Abortable so the
+    // overall timeout can't be overshot by a backoff interval.
+    if (attempt < RETRY.attempts - 1) await sleep(backoffMs(attempt), signal);
   }
   throw lastErr;
 }

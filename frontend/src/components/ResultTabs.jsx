@@ -43,8 +43,8 @@ function TorrentioTab({ result, onRetry, retrying }) {
   }
   return (
     <motion.div variants={staggerContainer} initial="initial" animate="animate">
-      {result.items.map((item, i) => (
-        <TorrentioRow key={i} item={item} />
+      {result.items.map((item) => (
+        <TorrentioRow key={item.magnet} item={item} />
       ))}
     </motion.div>
   );

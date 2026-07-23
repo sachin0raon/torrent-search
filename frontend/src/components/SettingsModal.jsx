@@ -12,7 +12,7 @@ export default function SettingsModal({ onClose, onSaved }) {
   const [source, setSource] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [torrentioMode, setTorrentioModeState] = useState(getTorrentioMode());
+  const [torrentioMode, setTorrentioModeState] = useState(() => getTorrentioMode());
 
   // Persist the Torrentio source toggle immediately (it's client-only, so it
   // takes effect on the next search regardless of the forum-URL Save button).
