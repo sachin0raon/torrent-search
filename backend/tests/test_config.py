@@ -50,3 +50,27 @@ def test_set_invalid_url_raises_and_does_not_write(cfg):
     with pytest.raises(cfg.ConfigError):
         cfg.set_forum_base_url("garbage")
     assert not cfg.config_path().exists()
+
+
+def test_probe_settings_defaults(cfg, monkeypatch):
+    for var in ("FORUM_PROBE_ENABLED", "FORUM_PROBE_INTERVAL_MINUTES", "FORUM_PROBE_QUERY"):
+        monkeypatch.delenv(var, raising=False)
+    s = cfg.get_forum_probe_settings()
+    assert s.enabled is True
+    assert s.interval_minutes == 30
+    assert s.query == "a"
+
+
+def test_probe_settings_from_env(cfg, monkeypatch):
+    monkeypatch.setenv("FORUM_PROBE_ENABLED", "false")
+    monkeypatch.setenv("FORUM_PROBE_INTERVAL_MINUTES", "120")
+    monkeypatch.setenv("FORUM_PROBE_QUERY", "batman")
+    s = cfg.get_forum_probe_settings()
+    assert s.enabled is False
+    assert s.interval_minutes == 120
+    assert s.query == "batman"
+
+
+def test_probe_interval_floored_at_one(cfg, monkeypatch):
+    monkeypatch.setenv("FORUM_PROBE_INTERVAL_MINUTES", "0")
+    assert cfg.get_forum_probe_settings().interval_minutes == 1

@@ -24,11 +24,35 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 from bs4 import BeautifulSoup
 
-from app.config import OUTBOUND_TIMEOUT_SECONDS
+from app.config import ConfigError, OUTBOUND_TIMEOUT_SECONDS, set_forum_base_url
 from app.models import ForumSearchItem, TopicLink
 from app.services.http import get_with_retry
 
 log = logging.getLogger("app.forum")
+
+# Serializes config.json read-modify-write between a user request and the
+# background probe so a concurrent redirect-persist can't lose an update.
+_persist_lock = asyncio.Lock()
+
+
+async def maybe_persist_new_base(current: str, resolved: str) -> str | None:
+    """If the reached origin differs from the configured base, persist it.
+
+    Only call after a valid search response, so `resolved` is a real forum
+    origin (not a parking/challenge page). Returns the saved URL, or None.
+    """
+    if not resolved or resolved.rstrip("/") == current.rstrip("/"):
+        return None
+    async with _persist_lock:
+        try:
+            # config.json write is blocking file I/O; offload it so the persist
+            # (which runs under the lock) never stalls the event loop.
+            saved = await asyncio.to_thread(set_forum_base_url, resolved)
+        except ConfigError as e:
+            log.warning("Detected new forum URL %s but it failed validation: %s", resolved, e)
+            return None
+    log.info("Forum base URL auto-updated after redirect: %s -> %s", current, saved)
+    return saved
 
 
 class ForumSearchResult(NamedTuple):

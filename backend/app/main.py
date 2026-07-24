@@ -17,8 +17,10 @@ from app.config import (
     OUTBOUND_TIMEOUT_SECONDS,
     REQUEST_HEADERS,
     get_forum_base_url,
+    get_forum_probe_settings,
 )
 from app.routers import forum, search, settings, streams
+from app.services.scheduler import create_scheduler
 
 
 def configure_logging() -> logging.Logger:
@@ -80,7 +82,23 @@ async def lifespan(fastapi_app: FastAPI):
         headers=REQUEST_HEADERS,
     ) as client:
         fastapi_app.state.http = client
-        yield
+        probe = get_forum_probe_settings()
+        scheduler = None
+        if probe.enabled:
+            scheduler = create_scheduler(client, probe.interval_minutes, probe.query)
+            scheduler.start()
+            log.info(
+                "Forum base URL probe scheduled every %d min (query=%r)",
+                probe.interval_minutes,
+                probe.query,
+            )
+        else:
+            log.info("Forum base URL probe disabled (FORUM_PROBE_ENABLED)")
+        try:
+            yield
+        finally:
+            if scheduler is not None:
+                scheduler.shutdown(wait=False)
     log.info("Shutdown")
 
 

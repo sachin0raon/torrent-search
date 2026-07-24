@@ -57,6 +57,33 @@ class RetrySettings(NamedTuple):
     deadline: float      # overall time budget across all attempts (seconds)
 
 
+class ProbeSettings(NamedTuple):
+    enabled: bool
+    interval_minutes: int
+    query: str
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def get_forum_probe_settings() -> ProbeSettings:
+    """Background forum-URL probe policy; read from env so it's tunable per deploy.
+
+    The probe periodically searches the configured base URL and persists any
+    redirected origin, so a moved forum domain is picked up even while idle
+    (not only on the next user search).
+    """
+    return ProbeSettings(
+        enabled=_env_flag("FORUM_PROBE_ENABLED", True),
+        interval_minutes=max(1, int(os.environ.get("FORUM_PROBE_INTERVAL_MINUTES", "30"))),
+        query=(os.environ.get("FORUM_PROBE_QUERY", "a").strip() or "a"),
+    )
+
+
 def get_retry_settings() -> RetrySettings:
     """Retry policy for outbound GET calls; read from env so it's tunable per deploy."""
     return RetrySettings(
