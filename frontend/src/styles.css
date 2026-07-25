@@ -35,7 +35,10 @@ body {
   overflow-x: hidden;
 }
 
-/* Ambient mesh-gradient orbs — fixed, blurred, GPU-cheap (no blur on scroll content). */
+/* Ambient mesh-gradient orbs — fixed, blurred, GPU-cheap (no blur on scroll content).
+   translateZ/will-change force their own compositor layer: without it, iOS Safari
+   detaches position:fixed layers during momentum scroll and snaps them back once
+   scrolling settles, showing up as a background "pop-in" delay on fast scrolls. */
 body::before {
   content: '';
   position: fixed;
@@ -46,6 +49,8 @@ body::before {
     radial-gradient(38rem 38rem at 92% 4%, rgba(154, 125, 255, 0.14), transparent 60%),
     radial-gradient(46rem 46rem at 70% 108%, rgba(87, 217, 163, 0.10), transparent 60%);
   pointer-events: none;
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 /* Film-grain overlay — fixed, non-interactive. */
@@ -57,6 +62,8 @@ body::after {
   pointer-events: none;
   opacity: 0.035;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 .container { max-width: 960px; margin: 0 auto; padding: 0 20px 96px; }
