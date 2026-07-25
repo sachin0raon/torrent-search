@@ -41,6 +41,15 @@ describe('api client', () => {
     expect(calledUrl).toContain('episode=5');
   });
 
+  it('builds discover URL with category/media_type/page', async () => {
+    global.fetch = mockFetch(200, { results: [] });
+    await api.discover({ category: 'trending', mediaType: 'movie', page: 2 });
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/discover?category=trending&media_type=movie&page=2',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   it('sends PUT with JSON body for config', async () => {
     global.fetch = mockFetch(200, { forum_base_url: 'https://x', source: 'config' });
     await api.setConfig('https://x');

@@ -84,6 +84,11 @@ def get_forum_probe_settings() -> ProbeSettings:
     )
 
 
+def get_discover_cache_ttl_seconds() -> float:
+    """TTL for the in-process Discover (trending/popular/top-rated) cache."""
+    return float(os.environ.get("DISCOVER_CACHE_TTL_SECONDS", "3600"))
+
+
 def get_retry_settings() -> RetrySettings:
     """Retry policy for outbound GET calls; read from env so it's tunable per deploy."""
     return RetrySettings(

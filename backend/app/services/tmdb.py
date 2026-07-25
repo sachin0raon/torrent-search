@@ -14,6 +14,24 @@ TMDB_BASE = "https://api.themoviedb.org/3"
 _POSTER_BASE = "https://image.tmdb.org/t/p/w200"
 
 
+def _dedup(items: list[TitleResult]) -> list[TitleResult]:
+    """Drop later duplicates by (media_type, tmdb_id), keeping first-seen order.
+
+    TMDB occasionally returns the same title twice in one response (seen on
+    search/multi and the discover endpoints); duplicates would otherwise reach
+    the frontend as two list items sharing one React key.
+    """
+    seen: set[tuple[str, int]] = set()
+    out = []
+    for tr in items:
+        key = (tr.media_type, tr.tmdb_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(tr)
+    return out
+
+
 def _to_title_result(item: dict) -> TitleResult | None:
     media_type = item.get("media_type")
     if media_type not in ("movie", "tv"):
@@ -50,7 +68,7 @@ async def search_multi(query: str, client: httpx.AsyncClient | None = None) -> l
         tr = _to_title_result(item)
         if tr is not None:
             results.append(tr)
-    return results
+    return _dedup(results)
 
 
 async def external_ids(
@@ -71,6 +89,52 @@ async def external_ids(
             await client.aclose()
     imdb_id = (data.get("imdb_id") or "").strip()
     return imdb_id or None
+
+
+async def _discover_list(
+    url: str, media_type: str, page: int, client: httpx.AsyncClient | None = None
+) -> list[TitleResult]:
+    """Shared fetch for the Discover endpoints below: same request/parse shape,
+    but each item is missing `media_type` (the TMDB endpoint is type-specific,
+    unlike search/multi), so it's injected before parsing."""
+    params = {"api_key": get_tmdb_api_key(), "page": page}
+    owns_client = client is None
+    client = client or httpx.AsyncClient(timeout=OUTBOUND_TIMEOUT_SECONDS)
+    try:
+        resp = await get_with_retry(client, url, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+    finally:
+        if owns_client:
+            await client.aclose()
+    results = []
+    for item in data.get("results", []):
+        item = {**item, "media_type": media_type}
+        tr = _to_title_result(item)
+        if tr is not None:
+            results.append(tr)
+    return _dedup(results)
+
+
+async def trending(
+    media_type: str, page: int = 1, client: httpx.AsyncClient | None = None
+) -> list[TitleResult]:
+    url = f"{TMDB_BASE}/trending/{media_type}/week"
+    return await _discover_list(url, media_type, page, client)
+
+
+async def popular(
+    media_type: str, page: int = 1, client: httpx.AsyncClient | None = None
+) -> list[TitleResult]:
+    url = f"{TMDB_BASE}/{media_type}/popular"
+    return await _discover_list(url, media_type, page, client)
+
+
+async def top_rated(
+    media_type: str, page: int = 1, client: httpx.AsyncClient | None = None
+) -> list[TitleResult]:
+    url = f"{TMDB_BASE}/{media_type}/top_rated"
+    return await _discover_list(url, media_type, page, client)
 
 
 async def tv_seasons(tmdb_id: int, client: httpx.AsyncClient | None = None) -> list[TvSeason]:

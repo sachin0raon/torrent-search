@@ -9,6 +9,13 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design, assumptions, and decis
   torrentio, and a configurable forum site; parses streams/HTML; builds magnets.
 - **Frontend:** React (Vite) SPA — thin renderer, tabbed results (Torrentio / Forum),
   with a per-browser toggle to fetch Torrentio client-side or server-side.
+- **Discover:** 6 badges below the search bar — Trending / Popular / All-Time
+  Favorites, movies and TV — for finding something without typing a query. Click a
+  badge to show its list (one visible at a time); click it again to hide it.
+  Auto-hides once any title is picked (search or Discover). Backed by a cached
+  `/api/discover` endpoint.
+- **Scroll-to-top:** a floating button, bottom-right, appears once you've scrolled
+  down and smooth-scrolls back to top.
 - Local single-user, no auth.
 
 > **Torrentio source (client vs server).** Torrentio sits behind Cloudflare, which
@@ -60,6 +67,8 @@ Open http://localhost:5173.
 | `FORUM_BASE_URL` | `backend/.env` | Default forum base URL. |
 | Forum base URL override | UI ⚙️ Settings | Persisted to `backend/config.json`; overrides the `.env` default and survives restarts. |
 | Torrentio source (client/server) | UI ⚙️ Settings | Persisted per-browser in `localStorage` (key `torrentioMode`, default **client**). Client fetches Torrentio from the browser to avoid server-side Cloudflare `403`s; server uses the backend. |
+| `DISCOVER_CACHE_TTL_SECONDS` | `backend/.env` | TTL (seconds) for the in-process cache of Discover rail responses (trending/popular/top-rated). Default `3600`. Lower = fresher lists, more TMDB calls; higher = fewer calls, staler lists. |
+| Active Discover badge | UI (below search bar) | Persisted per-browser in `localStorage` (key `discoverActiveBadge`, default none active). |
 
 ## Run with Docker
 
@@ -97,10 +106,10 @@ Notes:
 ## Tests
 
 ```bash
-# Backend (48 tests)
+# Backend (70 tests)
 cd backend && .venv/bin/python -m pytest -q
 
-# Frontend (9 tests)
+# Frontend (35 tests)
 cd frontend && npm test
 ```
 
@@ -125,11 +134,26 @@ cd frontend && npm test
 9. **Retry:** when the Torrentio tab shows an error, click **Retry** → it re-runs
    in the current mode (works with a mode switch in between, e.g. server 403 →
    flip to client → Retry succeeds).
+10. **Discover:** click a badge (e.g. **Trending Movies**) below the search bar →
+    its list loads; click a different badge → the first hides, the second loads;
+    click the active badge again → it hides. **Load more** appends another page;
+    click a poster → same flow as a search result (season/episode picker for TV,
+    then streams), and the Discover panel auto-hides once you do. Click
+    **← Change title** → the same badge reappears with its list intact (no
+    refetch). Switch away from a badge and back → instant, no refetch. Reload
+    the page → the badge you last explicitly clicked is still restored, even
+    if it auto-hid earlier.
+11. **Discover query isolation:** type a search (e.g. "batman") → get results →
+    instead of clicking a result, click a Discover badge and pick a title from
+    it → the forum search uses that title's own name, not "batman".
+12. **Scroll-to-top:** scroll down past a screen or so → a floating button
+    appears bottom-right → click it → page smooth-scrolls back to top, then the
+    button disappears again.
 
 ## Project layout
 
 ```
-backend/    FastAPI app, services (tmdb/torrentio/forum), tests + fixtures
-frontend/   Vite React SPA (components, api client, tests)
+backend/    FastAPI app, services (tmdb/torrentio/forum/discover_cache), tests + fixtures
+frontend/   Vite React SPA (components incl. Discover badges, api client, tests)
 docs/       DESIGN.md
 ```

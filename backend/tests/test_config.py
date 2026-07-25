@@ -5,9 +5,16 @@ import pytest
 
 @pytest.fixture
 def cfg(tmp_path, monkeypatch):
-    """Reload the config module pointed at a temp config.json and clean env."""
+    """Reload the config module pointed at a temp config.json and clean env.
+
+    Set (not delete) FORUM_BASE_URL to empty: config.py's module-level
+    load_dotenv() re-runs on reload with override=False, so a *deleted* var
+    would get silently refilled from a real backend/.env on disk — an empty
+    string still counts as "present" to dotenv, so it's left alone, and
+    get_forum_base_url() already treats an empty value as unset.
+    """
     monkeypatch.setenv("CONFIG_JSON_PATH", str(tmp_path / "config.json"))
-    monkeypatch.delenv("FORUM_BASE_URL", raising=False)
+    monkeypatch.setenv("FORUM_BASE_URL", "")
     import app.config as config
 
     importlib.reload(config)

@@ -51,6 +51,12 @@ export const api = {
       { signal },
     ),
 
+  discover: ({ category, mediaType, page }, signal) =>
+    request(
+      `/api/discover?${qs({ category, media_type: mediaType, page })}`,
+      { signal },
+    ),
+
   forumTopic: (url, signal) =>
     request(`/api/forum/topic?${qs({ url })}`, { signal }),
 

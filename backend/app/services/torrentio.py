@@ -73,12 +73,20 @@ def parse_stream_title(raw_title: str) -> dict:
 
 def streams_to_items(streams: list[dict]) -> list[TorrentioItem]:
     items: list[TorrentioItem] = []
+    seen_magnets: set[str] = set()
     for s in streams or []:
         info_hash = s.get("infoHash")
         if not info_hash:
             continue
         parsed = parse_stream_title(s.get("title", ""))
         magnet = build_magnet(parsed["title"], info_hash, s.get("sources"))
+        # Torrentio sometimes lists the same torrent (identical infoHash, title,
+        # and sources -> identical magnet) via more than one provider; keep the
+        # first and drop the rest, since a duplicate magnet is functionally a
+        # duplicate row (and would otherwise collide as a React key).
+        if magnet in seen_magnets:
+            continue
+        seen_magnets.add(magnet)
         items.append(
             TorrentioItem(
                 title=parsed["title"] or (s.get("behaviorHints", {}) or {}).get("filename", ""),

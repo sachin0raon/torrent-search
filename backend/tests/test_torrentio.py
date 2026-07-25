@@ -84,3 +84,26 @@ def test_streams_to_items_builds_magnets_and_skips_missing_hash():
 
 def test_streams_to_items_empty():
     assert streams_to_items([]) == []
+
+
+def test_streams_to_items_dedups_identical_magnet():
+    # Same torrent (title, infoHash, sources) listed twice, e.g. via two
+    # providers -> would otherwise produce two items with the same magnet.
+    streams = [
+        {
+            "title": "Movie\n👤 100 💾 1 GB ⚙️ ProviderA",
+            "infoHash": "633894b8378e4837dc551394c0637a35eb909c99",
+        },
+        {
+            "title": "Movie\n👤 50 💾 1 GB ⚙️ ProviderB",
+            "infoHash": "633894b8378e4837dc551394c0637a35eb909c99",
+        },
+        {
+            "title": "Movie\n👤 10 💾 1 GB ⚙️ ProviderC",
+            "infoHash": "4f3090b93b1520c36f7c13bc77dcb73bb5121685",  # different torrent
+        },
+    ]
+    items = streams_to_items(streams)
+    assert len(items) == 2
+    assert len({i.magnet for i in items}) == 2
+    assert items[0].seeders == 100  # first-seen kept, not overwritten by the dup

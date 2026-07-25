@@ -94,17 +94,25 @@ export function buildMagnet(displayTitle, infoHash, sources) {
 
 export function streamsToItems(streams) {
   const items = [];
+  const seenMagnets = new Set();
   for (const s of streams || []) {
     const infoHash = s.infoHash;
     if (!infoHash) continue;
     const parsed = parseStreamTitle(s.title || '');
     const filename = (s.behaviorHints && s.behaviorHints.filename) || '';
+    const magnet = buildMagnet(parsed.title, infoHash, s.sources);
+    // Torrentio sometimes lists the same torrent (identical infoHash, title,
+    // and sources -> identical magnet) via more than one provider; keep the
+    // first and drop the rest, since a duplicate magnet is functionally a
+    // duplicate row (and would otherwise collide as a React key).
+    if (seenMagnets.has(magnet)) continue;
+    seenMagnets.add(magnet);
     items.push({
       title: parsed.title || filename,
       seeders: parsed.seeders,
       size: parsed.size,
       source: parsed.source,
-      magnet: buildMagnet(parsed.title, infoHash, s.sources),
+      magnet,
     });
   }
   return items;

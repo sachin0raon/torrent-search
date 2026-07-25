@@ -3,12 +3,15 @@ import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { api } from './api/client.js';
 import * as clientTorrentio from './api/torrentio.js';
 import { getTorrentioMode } from './torrentioMode.js';
+import { getActiveDiscoverBadge, setActiveDiscoverBadge } from './discoverSectionState.js';
 import SearchBar from './components/SearchBar.jsx';
+import DiscoverSection from './components/DiscoverSection.jsx';
 import TitleList from './components/TitleList.jsx';
 import SeasonEpisodePicker from './components/SeasonEpisodePicker.jsx';
 import ResultTabs from './components/ResultTabs.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import Toast from './components/Toast.jsx';
+import ScrollToTopButton from './components/ScrollToTopButton.jsx';
 import { fadeUp, spring } from './motion.js';
 
 // Wizard stages: search -> select title -> (tv) pick episode -> streams.
@@ -26,6 +29,14 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [forumOnly, setForumOnly] = useState(false); // forum-only search (no TMDB title)
   const [tmdbFailed, setTmdbFailed] = useState(false); // last title search errored
+  const [discoverActive, setDiscoverActive] = useState(getActiveDiscoverBadge); // active Discover badge key, or null
+  const [discoverActiveBeforeSelect, setDiscoverActiveBeforeSelect] = useState(null); // restored by "Change title"
+
+  function toggleDiscoverBadge(key) {
+    const next = discoverActive === key ? null : key;
+    setDiscoverActive(next);
+    setActiveDiscoverBadge(next);
+  }
 
   // Auto-dismiss the error toast after a few seconds.
   useEffect(() => {
@@ -65,6 +76,7 @@ export default function App() {
     setStreams(null);
     setImdbId(undefined);
     setSeasons(null);
+    setDiscoverActive(discoverActiveBeforeSelect); // "← Change title" undoes the auto-hide from selecting
   }
 
   async function onSearch(q) {
@@ -84,12 +96,27 @@ export default function App() {
     }
   }
 
-  async function onSelectTitle(title) {
+  async function onSelectTitle(title, { fromDiscover = false } = {}) {
     setSelected(title);
     setStreams(null);
     setImdbId(undefined);
     setSeasons(null);
     setLoading('resolve');
+    // Hide Discover's shown list once anything is picked (search or Discover),
+    // but remember what was showing so "← Change title" can bring it back.
+    setDiscoverActiveBeforeSelect(discoverActive);
+    setDiscoverActive(null);
+
+    // Discover cards have no typed search query behind them, so always use the
+    // title's own name — and a *stale* query left over from an earlier, unrelated
+    // search must not leak into a fresh Discover-originated selection. A real
+    // search keeps using what the user typed (may deliberately differ from the
+    // TMDB-resolved title — forum aliases etc., see Decision Log #11).
+    // setRawQuery won't be visible in this closure until the next render, so the
+    // movie path below (which calls fetchStreams synchronously) passes `query`
+    // explicitly rather than relying on fetchStreams reading the stale state.
+    const query = fromDiscover ? title.title : rawQuery.trim() || title.title;
+    setRawQuery(query);
 
     // Resolve imdb_id, but tolerate failure: the forum search only needs the raw
     // query, so we still fetch streams (torrentio is simply skipped without an id).
@@ -117,11 +144,16 @@ export default function App() {
 
     // Movies fetch immediately; TV waits for the season/episode picker.
     if (title.media_type === 'movie') {
-      await fetchStreams(title, imdb, {});
+      await fetchStreams(title, imdb, {}, query);
     }
   }
 
-  async function fetchStreams(title, imdb_id, { season, episode }) {
+  // `queryOverride` is only needed by onSelectTitle's synchronous movie-path call
+  // above, where a just-set rawQuery isn't visible yet in this render's closure.
+  // Every other caller (season/episode picker, retry) runs after a re-render has
+  // already picked up the current rawQuery, so they can omit it.
+  async function fetchStreams(title, imdb_id, { season, episode }, queryOverride) {
+    const query = queryOverride ?? rawQuery;
     // Remember the request so the Torrentio "Retry" button can re-run the same
     // combined /api/streams fetch without needing the picker again.
     setLastStreamReq({ title, imdb_id, season, episode });
@@ -130,7 +162,7 @@ export default function App() {
       const serverPromise = api.streams({
         imdbId: imdb_id ?? undefined,
         mediaType: title.media_type,
-        rawQuery,
+        rawQuery: query,
         season,
         episode,
       });
@@ -231,6 +263,12 @@ export default function App() {
 
         <SearchBar onSearch={onSearch} disabled={loading === 'search'} />
 
+        <DiscoverSection
+          onSelect={(title) => onSelectTitle(title, { fromDiscover: true })}
+          active={discoverActive}
+          onToggleBadge={toggleDiscoverBadge}
+        />
+
         {loading === 'search' ? <div className="spinner">Searching titles…</div> : null}
 
         {/* Title list is hidden once a title is selected, so results sit right below. */}
@@ -330,6 +368,7 @@ export default function App() {
 
         <Toast message={error} onDismiss={() => setError('')} />
         <Toast variant="info" message={info} onDismiss={() => setInfo('')} />
+        <ScrollToTopButton />
 
         <AnimatePresence>
           {showSettings ? (

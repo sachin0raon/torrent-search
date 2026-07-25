@@ -325,6 +325,30 @@ select option { background: #14151a; color: var(--text); }
   flex: none;
 }
 
+/* ---- Discover section (badges select one of 6 trending/popular/top-rated lists) ---- */
+.discover-section { margin: 22px 0 6px; }
+.discover-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.discover-badge {
+  font-size: 13px;
+  padding: 8px 16px;
+  color: var(--muted);
+}
+.discover-badge:hover { color: var(--text); }
+.discover-badge.active {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, #6d8bff 0%, #b06dff 100%);
+  box-shadow: 0 6px 18px rgba(122, 120, 255, 0.42);
+}
+
+.discover-panel { margin-top: 18px; }
+.discover-panel-hidden { display: none; }
+.discover-load-more-wrap { display: flex; justify-content: center; margin-top: 14px; }
+
 /* ---- Tabs (segmented pill) ---- */
 .tabs {
   display: inline-flex;
@@ -402,6 +426,12 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   align-items: center;
   box-shadow: var(--inset-hi);
 }
+/* Backend/upstream error text can contain long unbroken tokens (a URL, for
+   instance — TMDB error bodies embed one). A flex item's default min-width:auto
+   stops it wrapping at that point and overflows the banner instead, so
+   override both explicitly; Dismiss is fixed-size so only the message shrinks. */
+.error-banner span { min-width: 0; overflow-wrap: break-word; }
+.error-banner button.link { flex: none; }
 
 .empty { color: var(--muted); padding: 28px; text-align: center; border: 1px dashed var(--hairline); border-radius: var(--radius-md); }
 .spinner { color: var(--muted); padding: 20px; text-align: center; }
@@ -457,6 +487,26 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .toggle-row { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; }
 .toggle-row input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; flex: none; }
 .copied { color: var(--ok); font-size: 12px; }
+
+/* ---- Scroll-to-top (floating, bottom-right) ---- */
+.scroll-top-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 45;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border-radius: 999px;
+  background: rgba(12, 12, 14, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--hairline);
+  color: var(--muted);
+  box-shadow: var(--inset-hi), 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.scroll-top-btn:hover { color: var(--text); background: rgba(20, 20, 24, 0.85); }
+.scroll-top-btn svg { width: 20px; height: 20px; }
 
 /* ---- Season/episode ---- */
 .season-episode {
@@ -540,6 +590,8 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   .forum-link-row { flex-wrap: wrap; }
   .forum-link-row .fname { flex-basis: 100%; }
   .forum-link-row .actions { margin-left: 0; }
+
+  .scroll-top-btn { bottom: 16px; right: 16px; }
 }
 
 /* ---- Touch targets: enforce >=44px hit areas on touch devices (pointer:coarse

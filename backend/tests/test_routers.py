@@ -4,6 +4,15 @@ import respx
 from fastapi.testclient import TestClient
 
 
+@pytest.fixture(autouse=True)
+def _clear_discover_cache():
+    from app.services import discover_cache
+
+    discover_cache._cache.clear()
+    yield
+    discover_cache._cache.clear()
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     # config values (paths, keys, base URL) are all read dynamically per call,
@@ -50,6 +59,29 @@ def test_search_filters_person(client):
 
 
 @respx.mock
+def test_search_dedups_repeated_title(client):
+    # TMDB occasionally returns the same title twice in one response; a
+    # duplicate (media_type, tmdb_id) would otherwise reach the frontend as
+    # two list items sharing one React key.
+    respx.get("https://api.themoviedb.org/3/search/multi").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"id": 1, "media_type": "movie", "title": "M", "release_date": "2020-01-01"},
+                    {"id": 1, "media_type": "movie", "title": "M", "release_date": "2020-01-01"},
+                    {"id": 2, "media_type": "tv", "name": "Show", "first_air_date": "2019-05-05"},
+                ]
+            },
+        )
+    )
+    resp = client.get("/api/search", params={"query": "x"})
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert [(r["media_type"], r["tmdb_id"]) for r in results] == [("movie", 1), ("tv", 2)]
+
+
+@respx.mock
 def test_tv_seasons(client):
     respx.get("https://api.themoviedb.org/3/tv/99/external_ids")  # not used, just registered
     respx.get("https://api.themoviedb.org/3/tv/99").mock(
@@ -80,6 +112,98 @@ def test_external_ids(client):
     )
     resp = client.get("/api/external-ids", params={"media_type": "movie", "tmdb_id": 42})
     assert resp.json() == {"imdb_id": "tt0042"}
+
+
+@respx.mock
+def test_discover_trending_movie(client):
+    respx.get("https://api.themoviedb.org/3/trending/movie/week").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"id": 1, "title": "Movie A", "release_date": "2024-03-01", "poster_path": "/a.jpg"},
+                    {"id": 2, "title": "Movie B", "release_date": "2023-01-01"},
+                ]
+            },
+        )
+    )
+    resp = client.get("/api/discover", params={"category": "trending", "media_type": "movie"})
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert [r["tmdb_id"] for r in results] == [1, 2]
+    assert all(r["media_type"] == "movie" for r in results)
+    assert results[0]["year"] == "2024"
+    assert results[0]["poster_url"].endswith("/a.jpg")
+
+
+@respx.mock
+def test_discover_dedups_repeated_title(client):
+    respx.get("https://api.themoviedb.org/3/trending/movie/week").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"id": 1, "title": "Movie A", "release_date": "2024-03-01"},
+                    {"id": 1, "title": "Movie A", "release_date": "2024-03-01"},
+                    {"id": 2, "title": "Movie B", "release_date": "2023-01-01"},
+                ]
+            },
+        )
+    )
+    resp = client.get("/api/discover", params={"category": "trending", "media_type": "movie"})
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert [r["tmdb_id"] for r in results] == [1, 2]
+
+
+@respx.mock
+def test_discover_popular_tv(client):
+    respx.get("https://api.themoviedb.org/3/tv/popular").mock(
+        return_value=httpx.Response(
+            200, json={"results": [{"id": 9, "name": "Show", "first_air_date": "2022-06-01"}]}
+        )
+    )
+    resp = client.get("/api/discover", params={"category": "popular", "media_type": "tv"})
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert results[0]["media_type"] == "tv"
+    assert results[0]["title"] == "Show"
+
+
+def test_discover_invalid_category(client):
+    resp = client.get("/api/discover", params={"category": "bogus", "media_type": "movie"})
+    assert resp.status_code == 422
+
+
+@respx.mock
+def test_discover_upstream_failure(client):
+    respx.get("https://api.themoviedb.org/3/movie/top_rated").mock(
+        return_value=httpx.Response(404)
+    )
+    resp = client.get("/api/discover", params={"category": "top_rated", "media_type": "movie"})
+    assert resp.status_code == 502
+
+
+@respx.mock
+def test_discover_pagination_maps_two_ui_pages_to_one_tmdb_page(client):
+    items = [
+        {"id": i, "title": f"T{i}", "release_date": "2024-01-01"} for i in range(1, 21)
+    ]
+    route = respx.get("https://api.themoviedb.org/3/trending/movie/week").mock(
+        return_value=httpx.Response(200, json={"results": items})
+    )
+
+    page1 = client.get(
+        "/api/discover", params={"category": "trending", "media_type": "movie", "page": 1}
+    ).json()["results"]
+    page2 = client.get(
+        "/api/discover", params={"category": "trending", "media_type": "movie", "page": 2}
+    ).json()["results"]
+
+    assert [r["tmdb_id"] for r in page1] == list(range(1, 11))
+    assert [r["tmdb_id"] for r in page2] == list(range(11, 21))
+    # Both UI pages come from the same cached TMDB page -> exactly one upstream call.
+    assert route.call_count == 1
 
 
 @respx.mock
