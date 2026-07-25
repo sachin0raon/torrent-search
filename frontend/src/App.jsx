@@ -101,6 +101,7 @@ export default function App() {
     setStreams(null);
     setImdbId(undefined);
     setSeasons(null);
+    setForumOnly(false);
     setLoading('resolve');
     // Hide Discover's shown list once anything is picked (search or Discover),
     // but remember what was showing so "← Change title" can bring it back.
