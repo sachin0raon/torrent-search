@@ -39,7 +39,7 @@ export const api = {
   tvSeasons: (tmdbId, signal) =>
     request(`/api/tv-seasons?${qs({ tmdb_id: tmdbId })}`, { signal }),
 
-  streams: ({ imdbId, mediaType, rawQuery, season, episode }, signal) =>
+  streams: ({ imdbId, mediaType, rawQuery, season, episode, skipTorrentio }, signal) =>
     request(
       `/api/streams?${qs({
         imdb_id: imdbId,
@@ -47,6 +47,7 @@ export const api = {
         raw_query: rawQuery,
         season,
         episode,
+        skip_torrentio: skipTorrentio,
       })}`,
       { signal },
     ),

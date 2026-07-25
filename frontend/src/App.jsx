@@ -158,6 +158,7 @@ export default function App() {
     // combined /api/streams fetch without needing the picker again.
     setLastStreamReq({ title, imdb_id, season, episode });
     setLoading('streams');
+    const clientMode = getTorrentioMode() === 'client';
     try {
       const serverPromise = api.streams({
         imdbId: imdb_id ?? undefined,
@@ -165,12 +166,12 @@ export default function App() {
         rawQuery: query,
         season,
         episode,
+        // Client mode fetches Torrentio from the browser (residential IP)
+        // instead, so tell the backend to skip its own Torrentio call.
+        skipTorrentio: clientMode,
       });
 
-      if (getTorrentioMode() === 'client') {
-        // Client mode: fetch Torrentio from the browser (residential IP) and take
-        // Forum from the backend's combined response. The server still runs its
-        // own Torrentio call, but we discard it — this keeps the backend untouched.
+      if (clientMode) {
         const [serverData, torrentio] = await Promise.all([
           serverPromise,
           clientTorrentio.fetchStreams({

@@ -66,7 +66,7 @@
 | 12 | No E2E (Playwright) for v1 | Full E2E suite | YAGNI for local tool; unit tests cover parsing risk |
 | 13 | UI visual style: dark theme (blue accent, card rows) | Light theme; light/dark toggle | User confirmed; sensible default for a media tool |
 | 14 | UI layout: single-page vertical wizard | Two-pane list+detail; results modal | User confirmed; simplest linear flow matching the staged data |
-| 15 | Torrentio fetch: per-browser **client/server toggle** (default client), persisted in `localStorage` | Server-only (original); always client | VPS/datacenter IPs get Cloudflare `403`; client mode uses the browser's residential IP. Backend left untouched — client mode still calls `/api/streams` for Forum and discards the server's Torrentio half. Client fetch mirrors the server retry policy (3 attempts, exp backoff + jitter). |
+| 15 | Torrentio fetch: per-browser **client/server toggle** (default client), persisted in `localStorage` | Server-only (original); always client | VPS/datacenter IPs get Cloudflare `403`; client mode uses the browser's residential IP. Client mode sends `skip_torrentio=true` on `/api/streams` so the backend only runs Forum, avoiding the redundant server-side Torrentio call. Client fetch mirrors the server retry policy (3 attempts, exp backoff + jitter). |
 | 16 | **Retry** button on Torrentio failure; re-runs in the currently selected mode | Auto-retry only; full re-search | Covers transient blips and lets a user flip server→client then retry without re-searching |
 | 17 | Discover section: 6 independent rails (Trending/Popular/Top Rated × Movie/TV), collapsible, collapsed by default, state in `localStorage` | Always expanded; hides during search; combined movie+TV rails | User wants trending + multiple curated lists without cluttering the primary search flow |
 | 18 | No "Best of a given year" category in v1 | Include with year param | User excluded it when selecting categories — YAGNI |
@@ -185,9 +185,9 @@ default **client**) selects where Torrentio is fetched:
 - **client** — the browser fetches Torrentio directly from `torrentio.strem.fun`
   (works because it sends `access-control-allow-origin: *`) using the visitor's
   residential IP, sidestepping the Cloudflare `403` that a datacenter/VPS IP hits.
-  The frontend still calls `/api/streams` for the **Forum** half and **discards the
-  server's Torrentio result**, so the backend is unchanged. The two halves are merged
-  client-side into the same `{ torrentio, forum }` shape.
+  The frontend calls `/api/streams?skip_torrentio=true`, so the backend skips its
+  own Torrentio call entirely and only runs the **Forum** search. The two halves
+  are merged client-side into the same `{ torrentio, forum }` shape.
 
 `api/torrentio.js` mirrors `services/torrentio.py`: same URL building, title parsing,
 and `quote_plus`-identical magnet construction, so client- and server-built magnets

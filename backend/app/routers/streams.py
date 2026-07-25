@@ -69,14 +69,21 @@ async def streams(
     raw_query: str = Query(..., min_length=1),
     season: int | None = Query(None),
     episode: int | None = Query(None),
+    skip_torrentio: bool = Query(False),
 ):
     # Shared app-lifetime client; run both sources concurrently.
     client = request.app.state.http
-    torrentio_res, forum_pair = await asyncio.gather(
-        _torrentio_source(imdb_id, media_type, season, episode, client),
-        _forum_source(raw_query, client),
-    )
-    forum_res, forum_updated = forum_pair
+    if skip_torrentio:
+        # Client mode: browser fetches torrentio directly, so skip the
+        # redundant server-side call entirely.
+        torrentio_res = SourceResult(ok=True, items=[])
+        forum_res, forum_updated = await _forum_source(raw_query, client)
+    else:
+        torrentio_res, forum_pair = await asyncio.gather(
+            _torrentio_source(imdb_id, media_type, season, episode, client),
+            _forum_source(raw_query, client),
+        )
+        forum_res, forum_updated = forum_pair
     return StreamsResponse(
         torrentio=torrentio_res, forum=forum_res, forum_base_updated=forum_updated
     )
