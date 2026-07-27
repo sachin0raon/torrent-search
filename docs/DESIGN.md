@@ -20,6 +20,15 @@
 > picking a Discover title; Discover now auto-hides its shown panel once any title
 > is selected (search or Discover); added a floating scroll-to-top button. See
 > Decision Log #26-29.
+>
+> **Update (2026-07-28):** added **torrent streaming** — any magnet-bearing result
+> (Torrentio + Forum) now has a **Stream** button that spins up a Go microservice,
+> fetches torrent metadata, lists files, and produces player deep links (`vlc://`,
+> MX Player intent, `nplayer-`) plus a **Copy stream URL** button. The "No
+> torrent-client integration" non-goal in §1 is reversed for this feature. The
+> container now runs three processes (nginx + uvicorn + Go streamer) behind a single
+> nginx front door; the public port is still 8000 (host) but nginx now listens on
+> 8080 inside the container. See [STREAMING.md](STREAMING.md) for the full design.
 
 ---
 
@@ -30,7 +39,7 @@
 - **Who:** Single user, running locally, no auth.
 - **Core flow:** (1) TMDB `search/multi` → pick title → (2) fetch `external_ids` for `imdb_id` → (3) **parallel** fan-out to **torrentio** (magnets ready) + **configurable forum site** (title + `tid` only) → (4) tabbed results; forum rows expand on click to fetch & parse their topic HTML for torrent/magnet links.
 - **Key constraints:** Backend required (CORS + HTML scraping). Torrentio params hardcoded (`sort=seeders|quality`, `qualityfilter=480p`). Forum base URL: `.env` default, UI-overridable, persisted to backend `config.json`. TV supports both season/episode selection and whole-series calls.
-- **Non-goals:** No download/torrent-client integration (magnet copy only), no auth, no multi-user, no accounts, no persistent search history/DB.
+- **Non-goals:** No auth, no multi-user, no accounts, no persistent search history/DB. *(Note: the "no torrent-client integration / magnet copy only" non-goal was reversed in 2026-07-28 with the streaming feature — see [STREAMING.md](STREAMING.md).)*
 
 ---
 
@@ -88,7 +97,7 @@
 
 ### 4.1 Architecture
 
-Two processes over HTTP on localhost:
+**Development** — two processes over HTTP on localhost:
 
 ```
 React (Vite) SPA :5173  ⇄  FastAPI backend :8000
@@ -98,6 +107,19 @@ React (Vite) SPA :5173  ⇄  FastAPI backend :8000
         │                    • forum base URL (configurable)
         └─────────────────► torrentio.strem.fun     (client mode only; browser's
                                                       residential IP, CORS: allow-*)
+```
+
+**Production / Docker** — three processes behind nginx (see [STREAMING.md](STREAMING.md) §4.1):
+
+```
+                     ┌──────────── Docker container ────────────┐
+ phone / browser ──►│ nginx :8080 (front door)                  │
+                     │   /              → static SPA             │
+                     │   /api/*         → uvicorn  :8000 (FastAPI)│
+                     │   /stream-api/*  → go-stream :8001        │
+                     │   /stream/*      → go-stream :8001        │
+                     └──────────────────────────────────────────┘
+Host port 8000 → container port 8080
 ```
 
 **Backend layout (`backend/`):**

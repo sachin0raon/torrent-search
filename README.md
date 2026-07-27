@@ -14,6 +14,12 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design, assumptions, and decis
   badge to show its list (one visible at a time); click it again to hide it.
   Auto-hides once any title is picked (search or Discover). Backed by a cached
   `/api/discover` endpoint.
+- **Stream:** any magnet-bearing row (Torrentio or Forum) has a **Stream** button.
+  Tap it to fetch torrent metadata, pick a file, and launch an external player via
+  deep link — `vlc://`, MX Player Android intent, or `nplayer-` — or copy the raw
+  stream URL. Powered by a Go microservice (`anacrolix/torrent v1.61.0`) running
+  alongside the backend. Idle streams are dropped after 10 minutes and their
+  downloaded data deleted. See [docs/STREAMING.md](docs/STREAMING.md).
 - **Scroll-to-top:** a floating button, bottom-right, appears once you've scrolled
   down and smooth-scrolls back to top.
 - Local single-user, no auth.
@@ -30,6 +36,7 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full design, assumptions, and decis
 
 - Python 3.11+ (the repo uses [uv](https://github.com/astral-sh/uv))
 - Node.js 18+
+- Go 1.24+ (only needed to run the streamer outside Docker)
 
 ## Setup
 
@@ -69,17 +76,24 @@ Open http://localhost:5173.
 | Torrentio source (client/server) | UI ⚙️ Settings | Persisted per-browser in `localStorage` (key `torrentioMode`, default **client**). Client fetches Torrentio from the browser to avoid server-side Cloudflare `403`s; server uses the backend. |
 | `DISCOVER_CACHE_TTL_SECONDS` | `backend/.env` | TTL (seconds) for the in-process cache of Discover rail responses (trending/popular/top-rated). Default `3600`. Lower = fresher lists, more TMDB calls; higher = fewer calls, staler lists. |
 | Active Discover badge | UI (below search bar) | Persisted per-browser in `localStorage` (key `discoverActiveBadge`, default none active). |
+| `STREAM_MAX_ACTIVE` | `docker-compose.yml` / env | Max concurrent active torrents (default `5`). |
+| `STREAM_IDLE_TIMEOUT` | `docker-compose.yml` / env | Seconds of idle (no stream reads) before a torrent is dropped and its data deleted (default `600`). |
+| `STREAM_METADATA_TIMEOUT` | `docker-compose.yml` / env | Seconds to wait for torrent metadata from DHT/peers before returning a timeout error (default `45`). |
+| `STREAM_TRACKERS_URLS` | `docker-compose.yml` / env | Comma-separated URLs of public tracker lists to fetch and add to every torrent. Empty/unset = use built-in defaults; `none` = disable tracker augmentation. |
+| `STREAM_TRACKERS_REFRESH` | `docker-compose.yml` / env | How often (seconds) to refresh the tracker lists (default `21600` = 6 h). |
 
 ## Run with Docker
 
-A single multi-stage image builds the React SPA and serves it (same origin) from
-the FastAPI backend, so everything runs on one port with no CORS setup.
+A single multi-stage image builds the React SPA, the Go streamer binary, and the
+Python backend, then serves everything from one nginx front door on port 8080
+inside the container (mapped to host port 8000). No CORS setup needed.
 
 ### docker compose (recommended)
 
 ```bash
 export TMDB_API_KEY=your_tmdb_api_key
-export FORUM_BASE_URL=https://your-forum.tld   # optional; also settable in the UI
+export FORUM_BASE_URL=https://your-forum.tld      # optional; also settable in the UI
+# export STREAM_TRACKERS_URLS=none                # disable tracker augmentation
 docker compose up --build
 ```
 
@@ -89,19 +103,24 @@ Open http://localhost:8000.
 
 ```bash
 docker build -t torrent-search-aggregator:latest .
-docker run --rm -p 8000:8000 \
+docker run --rm -p 8000:8080 \
   -e TMDB_API_KEY=your_tmdb_api_key \
   -e FORUM_BASE_URL=https://your-forum.tld \
   -v tsa_config:/data \
+  -v tsa_downloads:/downloads \
   torrent-search-aggregator:latest
 ```
 
 Notes:
-- Runs as a non-root user; image is ~270 MB.
+- Runs as a non-root user (UID 1001); image is ~400 MB (includes Go streamer binary).
+- Container port is **8080** (nginx); map to whichever host port you prefer (`-p 8000:8080`).
 - The forum-base-URL override (set from the UI) persists in the `/data` volume
   (`CONFIG_JSON_PATH=/data/config.json`).
+- Torrent download data lives in `/downloads` (ephemeral; wiped on restart and by
+  idle-GC after 10 min of inactivity). Mount it as a named volume so pieces survive
+  container updates.
 - `TMDB_API_KEY` is passed at runtime and never baked into the image.
-- Health check: `GET /api/health`.
+- Health check: `GET /api/health` (uvicorn) or `GET /healthz` (Go streamer).
 
 ## Tests
 
@@ -109,7 +128,10 @@ Notes:
 # Backend (70 tests)
 cd backend && .venv/bin/python -m pytest -q
 
-# Frontend (35 tests)
+# Go streamer (race-clean)
+cd streamer && go test -race ./...
+
+# Frontend (47 tests)
 cd frontend && npm test
 ```
 
@@ -149,11 +171,28 @@ cd frontend && npm test
 12. **Scroll-to-top:** scroll down past a screen or so → a floating button
     appears bottom-right → click it → page smooth-scrolls back to top, then the
     button disappears again.
+13. **Stream file list:** click **Stream** on any Torrentio or Forum magnet row →
+    a modal spins up, fetches metadata, and lists the torrent's files (name + size;
+    non-video files shown but Stream button disabled on them).
+14. **Player deep links:** click a file's **VLC / MX Player / nPlayer** button →
+    the device launches the matching player and starts playing; seek mid-file to
+    confirm range requests.
+15. **Copy stream URL:** click **Copy stream URL** next to any streamable file →
+    paste into a desktop player (e.g. VLC's "Open Network") and confirm playback.
+16. **Idle GC:** start a stream, leave it idle > 10 min → the session is dropped
+    and `/downloads` data is deleted; the player gets a `410 Gone` and the modal
+    offers **Restart stream**.
+17. **Capacity:** add 5 streams, try a 6th → modal shows "Too many active streams,
+    try again shortly" (`409`).
+18. **Tracker augmentation:** check the Go service logs on startup — it should log
+    "loaded N trackers from M sources"; set `STREAM_TRACKERS_URLS=none` to disable.
 
 ## Project layout
 
 ```
 backend/    FastAPI app, services (tmdb/torrentio/forum/discover_cache), tests + fixtures
-frontend/   Vite React SPA (components incl. Discover badges, api client, tests)
-docs/       DESIGN.md
+frontend/   Vite React SPA (components incl. Discover, Stream, api client, tests)
+streamer/   Go microservice — torrent session manager, HTTP stream server, tracker augmentation
+deploy/     nginx.conf, supervisord.conf (used by the Docker image)
+docs/       DESIGN.md, STREAMING.md
 ```

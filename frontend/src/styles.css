@@ -27,6 +27,7 @@ html { scroll-behavior: smooth; }
 
 body {
   margin: 0;
+  font-size: 15px;
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
@@ -459,6 +460,14 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .forum-link-row .fname { word-break: break-word; font-size: 14px; }
 .forum-link-row .actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 
+/* ---- Stream modal file list ---- */
+.stream-files { margin-top: 14px; display: grid; gap: 12px; max-height: 52vh; overflow-y: auto; }
+.stream-file-row { border: 1px solid var(--hairline); border-radius: var(--radius-md); padding: 12px; }
+.stream-file-head { display: flex; align-items: baseline; gap: 10px; justify-content: space-between; flex-wrap: wrap; }
+.stream-file-head .fname { word-break: break-word; font-size: 13px; }
+.player-links { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+.player-btn { white-space: nowrap; }
+
 /* ---- Modal ---- */
 .modal-backdrop {
   position: fixed;
@@ -473,7 +482,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   padding: 16px;
 }
 .modal {
-  background: rgba(18, 18, 21, 0.85);
+  background: #121215;
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-lg);
   padding: 26px;
@@ -485,7 +494,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   overflow-y: auto;
   box-shadow: var(--inset-hi), 0 30px 80px rgba(0, 0, 0, 0.6);
 }
-.modal h2 { font-family: 'Space Grotesk', sans-serif; margin-top: 0; font-size: 18px; letter-spacing: -0.01em; }
+.modal h2 { font-family: 'Space Grotesk', sans-serif; margin-top: 0; font-size: 16px; letter-spacing: -0.01em; word-break: break-word; }
 .modal .row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .modal .row input { border-radius: var(--radius-md); }
 .modal .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
@@ -597,6 +606,12 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   .forum-link-row { flex-wrap: wrap; }
   .forum-link-row .fname { flex-basis: 100%; }
   .forum-link-row .actions { margin-left: 0; }
+
+  /* Stream modal: tighter padding + filename always on its own line above the size. */
+  .modal { padding: 18px; }
+  .stream-file-head .fname { flex-basis: 100%; }
+  .player-links { gap: 6px; }
+  .player-btn { font-size: 13px; padding: 8px 14px; }
 
   .scroll-top-btn { bottom: 16px; right: 16px; }
 }

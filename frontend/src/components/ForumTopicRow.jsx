@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { api } from '../api/client.js';
 import CopyButton from './CopyButton.jsx';
+import StreamButton from './StreamButton.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
 import { spring } from '../motion.js';
 
@@ -91,7 +92,10 @@ export default function ForumTopicRow({ item }) {
                         </a>
                       ) : null}
                       {l.magnet ? (
-                        <CopyButton value={l.magnet} className="" />
+                        <>
+                          <StreamButton magnet={l.magnet} title={l.filename} />
+                          <CopyButton value={l.magnet} className="" />
+                        </>
                       ) : (
                         <span className="notice">no magnet</span>
                       )}

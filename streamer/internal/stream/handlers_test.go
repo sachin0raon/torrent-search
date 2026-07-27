@@ -1,0 +1,142 @@
+package stream
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func newTestServer(t *testing.T, cfg Config, build func(string) *fakeTorrent) (*Manager, http.Handler) {
+	t.Helper()
+	mgr := NewManager(cfg, newFakeClient(build))
+	t.Cleanup(mgr.Close)
+	return mgr, NewHandler(mgr, cfg).Routes()
+}
+
+func TestCreateSession_OK(t *testing.T) {
+	_, srv := newTestServer(t, testConfig(t), readyTorrent("Movie", &fakeFile{path: "Movie/a.mkv", data: []byte("data")}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/stream-api/sessions", strings.NewReader(`{"magnet":"magnet:?xt=urn:btih:AAA"}`))
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp sessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.SessionID == "" || !resp.Ready || len(resp.Files) != 1 || !resp.Files[0].Streamable {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestCreateSession_BadRequest(t *testing.T) {
+	_, srv := newTestServer(t, testConfig(t), readyTorrent("M"))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/stream-api/sessions", strings.NewReader(`{"magnet":""}`))
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestCreateSession_Capacity(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.MaxActive = 1
+	mgr, srv := newTestServer(t, cfg, readyTorrent("M", &fakeFile{path: "a.mp4", data: []byte("x")}))
+	if _, err := mgr.AddSession(context.Background(), "magnet:?xt=urn:btih:AAA"); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/stream-api/sessions", strings.NewReader(`{"magnet":"magnet:?xt=urn:btih:BBB"}`))
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", rec.Code)
+	}
+}
+
+func TestGetSession_Gone(t *testing.T) {
+	_, srv := newTestServer(t, testConfig(t), readyTorrent("M"))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/stream-api/sessions/nope", nil)
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("expected 410, got %d", rec.Code)
+	}
+}
+
+func TestStreamFile_RangeAndFull(t *testing.T) {
+	payload := []byte("0123456789")
+	mgr, srv := newTestServer(t, testConfig(t), readyTorrent("Movie", &fakeFile{path: "Movie/a.mp4", data: payload}))
+	s, err := mgr.AddSession(context.Background(), "magnet:?xt=urn:btih:AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := "/stream/" + s.ID + "/0/a.mp4"
+
+	// Full request.
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("full: expected 200, got %d", rec.Code)
+	}
+	if rec.Header().Get("Accept-Ranges") != "bytes" {
+		t.Error("full: missing Accept-Ranges")
+	}
+	if got, _ := io.ReadAll(rec.Body); string(got) != "0123456789" {
+		t.Errorf("full body = %q", got)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "video/mp4" {
+		t.Errorf("content-type = %q", ct)
+	}
+
+	// Range request bytes=2-5.
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Range", "bytes=2-5")
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusPartialContent {
+		t.Fatalf("range: expected 206, got %d", rec.Code)
+	}
+	if cr := rec.Header().Get("Content-Range"); cr != "bytes 2-5/10" {
+		t.Errorf("content-range = %q", cr)
+	}
+	if got, _ := io.ReadAll(rec.Body); string(got) != "2345" {
+		t.Errorf("range body = %q", got)
+	}
+}
+
+func TestStreamFile_Gone(t *testing.T) {
+	_, srv := newTestServer(t, testConfig(t), readyTorrent("M"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/stream/missing/0/a.mp4", nil))
+	if rec.Code != http.StatusGone {
+		t.Fatalf("expected 410, got %d", rec.Code)
+	}
+}
+
+func TestDeleteSession(t *testing.T) {
+	mgr, srv := newTestServer(t, testConfig(t), readyTorrent("M", &fakeFile{path: "a.mp4", data: []byte("x")}))
+	s, err := mgr.AddSession(context.Background(), "magnet:?xt=urn:btih:AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/stream-api/sessions/"+s.ID, nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/stream-api/sessions/"+s.ID, nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import CopyButton from './CopyButton.jsx';
+import StreamButton from './StreamButton.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
 import ForumTopicRow from './ForumTopicRow.jsx';
 import { spring, staggerContainer, staggerItem } from '../motion.js';
@@ -28,6 +29,7 @@ function TorrentioRow({ item }) {
           </div>
         </div>
         <div className="actions">
+          <StreamButton magnet={item.magnet} title={item.title} />
           <CopyButton value={item.magnet} className="" />
         </div>
       </div>

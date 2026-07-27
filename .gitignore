@@ -30,5 +30,10 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+# ---- Go (streamer) ----
+streamer/streamer
+*.test
+coverage.out
+
 # ---- Logs ----
 *.log

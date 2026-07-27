@@ -5,7 +5,8 @@ services:
       dockerfile: Dockerfile
     image: torrent-search-aggregator:latest
     ports:
-      - "8000:8000"
+      # Host:container — nginx front door serves SPA, /api, and /stream on 8080.
+      - "8000:8080"
     environment:
       # Required: your TMDB API key (server-side only).
       TMDB_API_KEY: ${TMDB_API_KEY:?set TMDB_API_KEY in your environment or a .env file}
@@ -16,21 +17,35 @@ services:
       # Retry policy for outbound API calls (retries 429/5xx + transport/timeout).
       EXTERNAL_MAX_ATTEMPTS: ${EXTERNAL_MAX_ATTEMPTS:-3}
       EXTERNAL_RETRY_DEADLINE: ${EXTERNAL_RETRY_DEADLINE:-15}
+      # Torrent streaming service (Go). See docs/STREAMING.md §4.6.
+      STREAM_MAX_ACTIVE: ${STREAM_MAX_ACTIVE:-5}
+      STREAM_IDLE_TIMEOUT: ${STREAM_IDLE_TIMEOUT:-600}
+      STREAM_METADATA_TIMEOUT: ${STREAM_METADATA_TIMEOUT:-45}
+      # Public tracker lists (comma-separated) fetched to boost peer discovery,
+      # refreshed periodically. Empty/unset uses the built-in defaults; set to
+      # "none" to disable extra trackers.
+      STREAM_TRACKERS_URLS: ${STREAM_TRACKERS_URLS:-}
+      STREAM_TRACKERS_REFRESH: ${STREAM_TRACKERS_REFRESH:-21600}
     volumes:
       # Persist the runtime forum-base-url override (config.json) across restarts.
       - app_config:/data
+      # Ephemeral torrent data (wiped on restart / idle-GC); a volume keeps it
+      # off the container writable layer.
+      - stream_downloads:/downloads
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/api/health').status==200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 10s
     deploy:
       resources:
         limits:
-          cpus: "0.75"
-          memory: 512M
+          # Headroom for ~5 concurrent torrents (peers, piece buffers, disk I/O).
+          cpus: "2"
+          memory: 2G
 
 volumes:
   app_config:
+  stream_downloads:

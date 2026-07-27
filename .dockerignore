@@ -11,6 +11,10 @@
 backend/.env
 backend/config.json
 
+# Go streamer — test files aren't compiled by go build, but trim context anyway
+streamer/**/*_test.go
+streamer/internal/stream/fakes_test.go
+
 # Repo/dev noise
 .git
 .gitignore
