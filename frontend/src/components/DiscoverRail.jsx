@@ -1,4 +1,5 @@
 import { memo, useEffect, useState } from 'react';
+import { ChevronDown, RefreshCw } from 'lucide-react';
 import { api } from '../api/client.js';
 import TitleCard from './TitleCard.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
@@ -52,7 +53,7 @@ function DiscoverRail({ category, mediaType, label, onSelect }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, mediaType]);
 
-  const retryPage = page + 1;
+  const nextPage = page + 1;
 
   return (
     <div className="discover-rail" aria-label={label}>
@@ -65,7 +66,7 @@ function DiscoverRail({ category, mediaType, label, onSelect }) {
       ) : null}
 
       {items.length === 0 && !loading && error ? (
-        <button onClick={() => loadPage(retryPage)}>Retry</button>
+        <button onClick={() => loadPage(nextPage)}><RefreshCw size={13} />Retry</button>
       ) : null}
 
       {items.length > 0 ? (
@@ -77,8 +78,9 @@ function DiscoverRail({ category, mediaType, label, onSelect }) {
           </div>
           {hasMore ? (
             <div className="discover-load-more-wrap">
-              <button onClick={() => loadPage(retryPage)} disabled={loading}>
-                {loading ? 'Loading…' : 'Load more'}
+              <button onClick={() => loadPage(nextPage)} disabled={loading}>
+                {!loading && (error ? <RefreshCw size={14} /> : <ChevronDown size={14} />)}
+                {loading ? 'Loading…' : error ? 'Retry' : 'Load more'}
               </button>
             </div>
           ) : null}

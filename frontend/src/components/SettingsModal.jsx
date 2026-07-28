@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { Save, X } from 'lucide-react';
 import { api } from '../api/client.js';
 import ErrorBanner from './ErrorBanner.jsx';
 import { getTorrentioMode, setTorrentioMode } from '../torrentioMode.js';
@@ -98,8 +99,9 @@ export default function SettingsModal({ onClose, onSaved }) {
 
         <ErrorBanner message={error} onDismiss={() => setError('')} />
         <div className="actions">
-          <button onClick={onClose}>Cancel</button>
+          <button onClick={onClose}><X size={14} />Cancel</button>
           <button className="primary" onClick={save} disabled={saving || !value.trim()}>
+            {!saving && <Save size={14} />}
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>

@@ -1,10 +1,48 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { ChevronDown, ChevronUp, Zap } from 'lucide-react';
 import { api } from '../api/client.js';
 import CopyButton from './CopyButton.jsx';
-import StreamButton from './StreamButton.jsx';
+import StreamPanel from './StreamPanel.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
-import { spring } from '../motion.js';
+import { collapsePanel } from '../motion.js';
+
+// One link row inside an expanded forum topic. Owns its own stream-open state.
+function ForumLinkRow({ link }) {
+  const [streamOpen, setStreamOpen] = useState(false);
+  return (
+    <div>
+      <div className="forum-link-row">
+        <span className="fname">{link.filename || '(unnamed)'}</span>
+        <div className="actions">
+          {link.file_url ? (
+            <a href={link.file_url} target="_blank" rel="noreferrer">
+              <button>Torrent file</button>
+            </a>
+          ) : null}
+          {link.magnet ? (
+            <>
+              <button onClick={() => setStreamOpen((o) => !o)}>
+                <Zap size={13} />
+                {streamOpen ? 'Hide stream' : 'Stream'}
+              </button>
+              <CopyButton value={link.magnet} className="" />
+            </>
+          ) : (
+            <span className="notice">no magnet</span>
+          )}
+        </div>
+      </div>
+      <AnimatePresence initial={false}>
+        {streamOpen && (
+          <motion.div key="stream" {...collapsePanel} style={{ overflow: 'hidden' }}>
+            <StreamPanel magnet={link.magnet} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
 
 // A forum search result. Its file/magnet links are fetched lazily when expanded
 // (a second request that parses the topic HTML page).
@@ -57,6 +95,7 @@ export default function ForumTopicRow({ item }) {
         </a>
         <div className="actions">
           <button onClick={toggle} aria-expanded={expanded}>
+            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             {expanded ? 'Hide links' : 'Show links'}
           </button>
         </div>
@@ -68,40 +107,15 @@ export default function ForumTopicRow({ item }) {
 
       <AnimatePresence initial={false}>
         {expanded ? (
-          <motion.div
-            key="links"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={spring}
-            style={{ overflow: 'hidden' }}
-          >
+          <motion.div key="links" {...collapsePanel} style={{ overflow: 'hidden' }}>
             <div className="forum-links">
               {loading ? <div className="spinner">Loading links…</div> : null}
               {links && links.length === 0 && !loading ? (
                 <div className="empty">No torrent or magnet links found on topic page.</div>
               ) : null}
-              {links &&
-                links.map((l, i) => (
-                  <div className="forum-link-row" key={i}>
-                    <span className="fname">{l.filename || '(unnamed)'}</span>
-                    <div className="actions">
-                      {l.file_url ? (
-                        <a href={l.file_url} target="_blank" rel="noreferrer">
-                          <button>Torrent file</button>
-                        </a>
-                      ) : null}
-                      {l.magnet ? (
-                        <>
-                          <StreamButton magnet={l.magnet} title={l.filename} />
-                          <CopyButton value={l.magnet} className="" />
-                        </>
-                      ) : (
-                        <span className="notice">no magnet</span>
-                      )}
-                    </div>
-                  </div>
-                ))}
+              {links
+                ? links.map((l, i) => <ForumLinkRow key={i} link={l} />)
+                : null}
             </div>
           </motion.div>
         ) : null}

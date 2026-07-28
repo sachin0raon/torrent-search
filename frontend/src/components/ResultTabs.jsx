@@ -1,22 +1,25 @@
 import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
+import { RefreshCw, Zap } from 'lucide-react';
 import CopyButton from './CopyButton.jsx';
-import StreamButton from './StreamButton.jsx';
+import StreamPanel from './StreamPanel.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
 import ForumTopicRow from './ForumTopicRow.jsx';
-import { spring, staggerContainer, staggerItem } from '../motion.js';
+import { spring, staggerContainer, staggerItem, collapsePanel } from '../motion.js';
 
 // Shared plain-glass retry control for per-source failures (Torrentio / Forum).
 function RetryButton({ onRetry, retrying }) {
   if (!onRetry) return null;
   return (
     <button onClick={onRetry} disabled={retrying} style={{ marginTop: 2 }}>
+      {!retrying && <RefreshCw size={13} />}
       {retrying ? 'Retrying…' : 'Retry'}
     </button>
   );
 }
 
 function TorrentioRow({ item }) {
+  const [streamOpen, setStreamOpen] = useState(false);
   return (
     <motion.div className="result-row" variants={staggerItem} whileHover={{ y: -2 }}>
       <div className="row-main">
@@ -29,10 +32,20 @@ function TorrentioRow({ item }) {
           </div>
         </div>
         <div className="actions">
-          <StreamButton magnet={item.magnet} title={item.title} />
+          <button onClick={() => setStreamOpen((o) => !o)} disabled={!item.magnet}>
+            <Zap size={13} />
+            {streamOpen ? 'Hide stream' : 'Stream'}
+          </button>
           <CopyButton value={item.magnet} className="" />
         </div>
       </div>
+      <AnimatePresence initial={false}>
+        {streamOpen && (
+          <motion.div key="stream" {...collapsePanel} style={{ overflow: 'hidden' }}>
+            <StreamPanel magnet={item.magnet} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

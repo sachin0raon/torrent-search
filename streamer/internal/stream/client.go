@@ -1,7 +1,10 @@
 package stream
 
 import (
+	"fmt"
 	"io"
+	"net/url"
+	"strings"
 
 	"github.com/anacrolix/torrent"
 )
@@ -63,12 +66,75 @@ func NewAnacrolixClient(dataDir string) (TorrentClient, error) {
 	return &anacrolixClient{c: c}, nil
 }
 
-func (a *anacrolixClient) AddMagnet(uri string) (Torrent, error) {
-	t, err := a.c.AddMagnet(uri)
-	if err != nil {
-		return nil, err
+func (a *anacrolixClient) AddMagnet(uri string) (t Torrent, err error) {
+	// anacrolix/torrent calls panicif.Err when it encounters a tracker URL with
+	// an unsupported scheme (e.g. wss://, i2p://). Catch that here so the panic
+	// cannot escape and leave the Manager mutex permanently locked.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("torrent library panicked: %v", r)
+		}
+	}()
+	torrent, addErr := a.c.AddMagnet(sanitizeMagnet(uri))
+	if addErr != nil {
+		return nil, addErr
 	}
-	return &anacrolixTorrent{t: t}, nil
+	return &anacrolixTorrent{t: torrent}, nil
+}
+
+// sanitizeMagnet normalises tracker URLs in a magnet link so that
+// anacrolix/torrent does not panic. Two classes of bad input are handled:
+//
+//  1. The "tracker:" prefix — some sites (e.g. t-ru.org) emit tracker
+//     announce URLs as "tracker:http://…" or "tracker:udp://…". The library
+//     treats the scheme as "tracker", hits an unsupported-scheme branch, and
+//     calls panicif.Err. We strip the prefix so the inner URL is used directly.
+//
+//  2. Genuinely unsupported schemes (wss://, i2p://, …) — dropped entirely.
+//
+// The mutex-leak danger: AddSession holds m.mu while calling AddMagnet. A
+// panic there bypasses every explicit Unlock and leaves the mutex permanently
+// locked. We also recover() in AddMagnet itself, but sanitizing first is the
+// cleaner fix.
+func sanitizeMagnet(raw string) string {
+	qIdx := strings.Index(raw, "?")
+	if qIdx < 0 {
+		return raw
+	}
+	q, err := url.ParseQuery(raw[qIdx+1:])
+	if err != nil {
+		return raw
+	}
+	trs := q["tr"]
+	if len(trs) == 0 {
+		return raw
+	}
+	filtered := make([]string, 0, len(trs))
+	changed := false
+	for _, tr := range trs {
+		// Unwrap the non-standard "tracker:" prefix before checking the scheme.
+		inner := tr
+		if strings.HasPrefix(strings.ToLower(tr), "tracker:") {
+			inner = tr[len("tracker:"):]
+			changed = true
+		}
+		tu, err := url.Parse(inner)
+		if err != nil {
+			changed = true
+			continue
+		}
+		switch tu.Scheme {
+		case "http", "https", "udp":
+			filtered = append(filtered, inner)
+		default:
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	q["tr"] = filtered
+	return raw[:qIdx+1] + q.Encode()
 }
 
 func (a *anacrolixClient) Close() { a.c.Close() }

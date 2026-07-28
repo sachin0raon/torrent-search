@@ -22,3 +22,12 @@ export const staggerItem = {
   animate: { opacity: 1, y: 0, filter: 'blur(0px)', transition: spring },
   exit: { opacity: 0, y: -8, filter: 'blur(3px)', transition: { duration: 0.18 } },
 };
+
+// Expand/collapse panel (height 0 ↔ auto). Spread onto a motion.div inside
+// AnimatePresence, then add style={{ overflow: 'hidden' }}.
+export const collapsePanel = {
+  initial: { height: 0, opacity: 0 },
+  animate: { height: 'auto', opacity: 1 },
+  exit: { height: 0, opacity: 0 },
+  transition: spring,
+};

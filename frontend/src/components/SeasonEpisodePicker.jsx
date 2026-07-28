@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
+import { Search } from 'lucide-react';
 import { fadeUp, spring } from '../motion.js';
 
 // TV only. Whole series (no season/episode) -> whole-series torrentio call;
@@ -103,6 +104,7 @@ export default function SeasonEpisodePicker({ onFetch, seasons, loadingSeasons }
       )}
 
       <button className="primary" type="submit" disabled={!bothOrNeither}>
+        <Search size={14} />
         Find torrents
       </button>
       {!hasSeasons && !bothOrNeither ? (

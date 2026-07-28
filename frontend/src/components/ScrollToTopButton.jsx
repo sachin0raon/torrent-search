@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { ArrowUp } from 'lucide-react';
 
 const SHOW_AFTER_PX = 400;
 
@@ -39,10 +40,7 @@ export default function ScrollToTopButton() {
           exit={{ opacity: 0, scale: 0.8, y: 10 }}
           transition={{ duration: 0.2 }}
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-            strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 19V5M5 12l7-7 7 7" />
-          </svg>
+          <ArrowUp size={20} />
         </motion.button>
       ) : null}
     </AnimatePresence>

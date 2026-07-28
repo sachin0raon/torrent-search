@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Check, Copy } from 'lucide-react';
 
 // Copies a magnet link to the clipboard and shows a transient "Copied" state.
 export default function CopyButton({ value, label = 'Copy magnet', className = 'btn-solid' }) {
@@ -29,7 +30,8 @@ export default function CopyButton({ value, label = 'Copy magnet', className = '
 
   return (
     <button className={className} onClick={onCopy} disabled={!value}>
-      {copied ? 'Copied ✓' : label}
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+      {copied ? 'Copied' : label}
     </button>
   );
 }

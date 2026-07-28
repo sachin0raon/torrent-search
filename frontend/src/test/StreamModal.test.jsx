@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import StreamModal from '../components/StreamModal.jsx';
+import StreamPanel from '../components/StreamPanel.jsx';
 import { streamer } from '../api/streamer.js';
 
 vi.mock('../api/streamer.js', () => ({
   streamer: { createSession: vi.fn(), getSession: vi.fn() },
 }));
 
-describe('StreamModal', () => {
+describe('StreamPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue() } });
@@ -25,10 +25,13 @@ describe('StreamModal', () => {
       ],
     });
 
-    render(<StreamModal magnet="magnet:?xt=1" title="Movie" onClose={() => {}} />);
+    render(<StreamPanel magnet="magnet:?xt=1" />);
 
     expect(await screen.findByText('movie.mkv')).toBeInTheDocument();
-    // Player deep links present.
+    // Player links are hidden until the row is expanded.
+    expect(screen.queryByRole('button', { name: 'VLC' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /show links/i }));
+    // Player deep links now visible.
     expect(screen.getByRole('button', { name: 'VLC' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'nPlayer' })).toBeInTheDocument();
     // Copy stream URL button copies the absolute same-origin URL.
@@ -41,7 +44,7 @@ describe('StreamModal', () => {
 
   it('shows an error with retry when the service fails', async () => {
     streamer.createSession.mockRejectedValueOnce(new Error('couldn\'t fetch torrent info (no peers?)'));
-    render(<StreamModal magnet="magnet:?xt=1" title="Movie" onClose={() => {}} />);
+    render(<StreamPanel magnet="magnet:?xt=1" />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('no peers');
 
@@ -58,7 +61,7 @@ describe('StreamModal', () => {
       ready: true,
       files: [{ index: 0, path: 'notes.txt', size: 10, streamable: false }],
     });
-    render(<StreamModal magnet="magnet:?xt=1" title="Pack" onClose={() => {}} />);
+    render(<StreamPanel magnet="magnet:?xt=1" />);
     expect(await screen.findByText('No playable video files in this torrent.')).toBeInTheDocument();
   });
 });
