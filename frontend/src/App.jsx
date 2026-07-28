@@ -81,6 +81,8 @@ export default function App() {
 
   async function onSearch(q) {
     resetBelowSearch();
+    setDiscoverActive(null);
+    setActiveDiscoverBadge(null);
     setRawQuery(q);
     setLoading('search');
     try {

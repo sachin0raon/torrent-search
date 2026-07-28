@@ -40,13 +40,16 @@ function FileRow({ session, file }) {
   const name = baseName(file.path);
 
   if (!file.streamable) {
+    const downloadUrl = buildStreamUrl(session.sessionId, file.index, name);
     return (
       <div className="stream-file-row">
         <div className="stream-file-head">
           <span className="fname">{name}</span>
           <div className="stream-file-actions">
             <span className="notice">{formatSize(file.size)}</span>
-            <span className="notice">not playable</span>
+            <a href={downloadUrl} download={name} rel="noreferrer">
+              <button className="player-btn">Download</button>
+            </a>
           </div>
         </div>
       </div>
@@ -103,8 +106,6 @@ export default function StreamPanel({ magnet }) {
     };
   }, [magnet, attempt]);
 
-  const streamable = session ? session.files.filter((f) => f.streamable) : [];
-
   return (
     <div className="stream-panel">
       {loading ? <div className="spinner">Fetching torrent info…</div> : null}
@@ -117,8 +118,6 @@ export default function StreamPanel({ magnet }) {
             </>
           ) : session?.files.length === 0 ? (
             <div className="empty">No files in this torrent.</div>
-          ) : streamable.length === 0 ? (
-            <div className="empty">No playable video files in this torrent.</div>
           ) : (
             session.files.map((f) => (
               <FileRow key={`${session.sessionId}-${f.index}`} session={session} file={f} />
