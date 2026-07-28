@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSessions } from './sessionContext.jsx';
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { api } from './api/client.js';
 import * as clientTorrentio from './api/torrentio.js';
@@ -10,6 +11,7 @@ import TitleList from './components/TitleList.jsx';
 import SeasonEpisodePicker from './components/SeasonEpisodePicker.jsx';
 import ResultTabs from './components/ResultTabs.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
+import StatsModal from './components/StatsModal.jsx';
 import Toast from './components/Toast.jsx';
 import ScrollToTopButton from './components/ScrollToTopButton.jsx';
 import { fadeUp, spring } from './motion.js';
@@ -27,10 +29,12 @@ export default function App() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState(''); // non-error notice (e.g. forum URL auto-updated)
   const [showSettings, setShowSettings] = useState(false);
+  const [showStats, setShowStats] = useState(false);
   const [forumOnly, setForumOnly] = useState(false); // forum-only search (no TMDB title)
   const [tmdbFailed, setTmdbFailed] = useState(false); // last title search errored
   const [discoverActive, setDiscoverActive] = useState(getActiveDiscoverBadge); // active Discover badge key, or null
   const [discoverActiveBeforeSelect, setDiscoverActiveBeforeSelect] = useState(null); // restored by "Change title"
+  const { sessions } = useSessions();
 
   function toggleDiscoverBadge(key) {
     const next = discoverActive === key ? null : key;
@@ -374,9 +378,26 @@ export default function App() {
         <Toast variant="info" message={info} onDismiss={() => setInfo('')} />
         <ScrollToTopButton />
 
+        {sessions.size > 0 && (
+          <button
+            className="stats-fab icon-btn"
+            onClick={() => setShowStats(true)}
+            aria-label="Active streams"
+            title="Active streams"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
+              strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+          </button>
+        )}
+
         <AnimatePresence>
           {showSettings ? (
             <SettingsModal onClose={() => setShowSettings(false)} onSaved={() => { }} />
+          ) : null}
+          {showStats ? (
+            <StatsModal onClose={() => setShowStats(false)} />
           ) : null}
         </AnimatePresence>
       </div>

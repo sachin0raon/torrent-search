@@ -35,6 +35,22 @@ type FileInfo struct {
 	Streamable bool   `json:"streamable"`
 }
 
+// FileProgress carries live download progress for one file.
+type FileProgress struct {
+	Index      int    `json:"index"`
+	Name       string `json:"name"`
+	Size       int64  `json:"size"`
+	Downloaded int64  `json:"downloaded"`
+}
+
+// SessionStats is the response body for GET /stream-api/sessions/{id}/stats.
+type SessionStats struct {
+	SessionID string         `json:"sessionId"`
+	Name      string         `json:"name"`
+	Seeders   int            `json:"seeders"`
+	Files     []FileProgress `json:"files"`
+}
+
 // Session is one active torrent.
 type Session struct {
 	ID       string
@@ -352,6 +368,49 @@ func (m *Manager) collectIdle() {
 		log.Printf("streamer: session %s idle-expired name=%q", s.ID, s.Name)
 		m.remove(s)
 	}
+}
+
+// GetStats returns live download stats for a session. The anacrolix calls
+// (Stats, BytesCompleted) are thread-safe and intentionally made outside m.mu.
+func (m *Manager) GetStats(id string) (SessionStats, bool) {
+	m.mu.Lock()
+	s, ok := m.sessions[id]
+	if !ok {
+		m.mu.Unlock()
+		return SessionStats{}, false
+	}
+	rawFiles := s.t.Files()
+	cached := make([]FileInfo, len(s.files))
+	copy(cached, s.files)
+	name := s.Name
+	m.mu.Unlock()
+
+	// Touch the idle timer so that polling the stats panel keeps the session
+	// alive even when no file is being actively streamed.
+	s.touch(m.now())
+
+	stat := s.t.Stats()
+	fps := make([]FileProgress, len(rawFiles))
+	for i, f := range rawFiles {
+		var size int64
+		if i < len(cached) {
+			size = cached[i].Size
+		} else {
+			size = f.Length()
+		}
+		fps[i] = FileProgress{
+			Index:      i,
+			Name:       filepath.Base(f.Path()),
+			Size:       size,
+			Downloaded: f.BytesCompleted(),
+		}
+	}
+	return SessionStats{
+		SessionID: id,
+		Name:      name,
+		Seeders:   stat.ConnectedSeeders,
+		Files:     fps,
+	}, true
 }
 
 // Close stops the GC loop and the torrent client.

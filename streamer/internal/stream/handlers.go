@@ -33,6 +33,7 @@ func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /stream-api/sessions", h.createSession)
 	mux.HandleFunc("GET /stream-api/sessions/{id}", h.getSession)
+	mux.HandleFunc("GET /stream-api/sessions/{id}/stats", h.getSessionStats)
 	mux.HandleFunc("DELETE /stream-api/sessions/{id}", h.deleteSession)
 	mux.HandleFunc("GET /stream/{id}/{index}/{filename...}", h.streamFile)
 	mux.HandleFunc("GET /healthz", h.health)
@@ -85,6 +86,15 @@ func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, h.sessionResponse(s))
+}
+
+func (h *Handler) getSessionStats(w http.ResponseWriter, r *http.Request) {
+	stats, ok := h.mgr.GetStats(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusGone, "session not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
 }
 
 func (h *Handler) deleteSession(w http.ResponseWriter, r *http.Request) {

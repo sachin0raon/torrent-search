@@ -2,22 +2,12 @@ import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { streamer } from '../api/streamer.js';
+import { useSessions } from '../sessionContext.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
 import CopyButton from './CopyButton.jsx';
 import { buildStreamUrl, playerLinks, baseName } from '../playerLinks.js';
 import { collapsePanel } from '../motion.js';
-
-function formatSize(bytes) {
-  if (bytes == null || bytes < 0) return '—';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let n = bytes;
-  let i = 0;
-  while (n >= 1024 && i < units.length - 1) {
-    n /= 1024;
-    i += 1;
-  }
-  return `${n.toFixed(n >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
-}
+import { formatSize } from '../formatSize.js';
 
 // Rendered only when the row is expanded — defers URL/link building until needed.
 function StreamableLinks({ session, file, name }) {
@@ -86,6 +76,7 @@ export default function StreamPanel({ magnet }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
+  const { register, unregister } = useSessions();
 
   useEffect(() => {
     let active = true;
@@ -94,7 +85,11 @@ export default function StreamPanel({ magnet }) {
     setError('');
     streamer
       .createSession(magnet, controller.signal)
-      .then((s) => active && setSession(s))
+      .then((s) => {
+        if (!active) return;
+        setSession(s);
+        register(s.sessionId, s.name);
+      })
       .catch((e) => {
         if (!active || e.name === 'AbortError') return;
         setError(e.message || 'Failed to start stream');
@@ -104,7 +99,13 @@ export default function StreamPanel({ magnet }) {
       active = false;
       controller.abort();
     };
-  }, [magnet, attempt]);
+  }, [magnet, attempt, register]);
+
+  // Unregister when the panel unmounts or the session changes.
+  useEffect(() => {
+    if (!session) return undefined;
+    return () => unregister(session.sessionId);
+  }, [session, unregister]);
 
   return (
     <div className="stream-panel">

@@ -31,4 +31,8 @@ export const streamer = {
 
   // Poll an existing session (e.g. while metadata is still arriving).
   getSession: (id, signal) => request(`/stream-api/sessions/${id}`, { signal }),
+
+  // Fetch live stats for a session: seeders + per-file download progress.
+  // Throws with err.status === 410 if the session has been GC'd.
+  getStats: (id, signal) => request(`/stream-api/sessions/${id}/stats`, { signal }),
 };

@@ -71,13 +71,10 @@ body::after {
 
 /* ---- Minimal floating settings control (top-right) ---- */
 header.app-header {
-  position: sticky;
+  position: fixed;
   top: 16px;
+  right: 16px;
   z-index: 40;
-  display: flex;
-  justify-content: flex-end;
-  height: 0; /* collapse so it doesn't push the hero down */
-  margin-top: 16px;
   pointer-events: none;
 }
 .icon-btn {
@@ -89,14 +86,14 @@ header.app-header {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: rgba(12, 12, 14, 0.55);
+  background: rgba(22, 22, 26, 0.92);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--hairline);
-  color: var(--muted);
-  box-shadow: var(--inset-hi), 0 8px 26px rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--hairline-strong);
+  color: var(--text);
+  box-shadow: var(--inset-hi), 0 8px 26px rgba(0, 0, 0, 0.5);
 }
-.icon-btn:hover { color: var(--text); background: rgba(20, 20, 24, 0.7); transform: rotate(35deg); }
+.icon-btn:hover { color: #fff; background: rgba(36, 36, 44, 0.98); transform: rotate(35deg); }
 .icon-btn svg { width: 19px; height: 19px; }
 
 /* ---- Hero eyebrow + title ---- */
@@ -620,6 +617,120 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   .player-btn { font-size: 13px; padding: 8px 14px; }
 
   .scroll-top-btn { bottom: 16px; right: 16px; }
+}
+
+/* ---- Stats FAB (floating activity button, top-left) ---- */
+.stats-fab {
+  position: fixed;
+  top: 66px;
+  right: 16px;
+  z-index: 50;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  /* background intentionally omitted — inherits from .icon-btn */
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  transition: background 0.15s, transform 0.15s;
+}
+.stats-fab:hover { background: rgba(36, 36, 44, 0.98); transform: none; }
+.stats-fab svg { width: 18px; height: 18px; }
+
+/* ---- StatsModal ---- */
+.stats-modal {
+  width: 480px;
+  max-width: 96vw;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.modal-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.stats-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---- Session card ---- */
+.stats-session-card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+.stats-session-card.stats-session-expired {
+  opacity: 0.5;
+}
+.stats-session-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.stats-session-name {
+  font-size: 13px;
+  font-weight: 500;
+  word-break: break-word;
+  flex: 1;
+}
+.stats-session-chips {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  align-items: center;
+}
+.stats-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.stats-chip-expired { color: var(--muted); }
+.stats-chip-error { color: #e5a44a; background: rgba(229, 164, 74, 0.12); }
+
+/* ---- File rows ---- */
+.stats-file-list { display: flex; flex-direction: column; gap: 10px; }
+.stats-file-row { display: flex; flex-direction: column; gap: 4px; }
+.stats-file-name {
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+}
+.stats-progress-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.stats-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+.stats-file-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+.stats-empty-files {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 /* ---- Touch targets: enforce >=44px hit areas on touch devices (pointer:coarse

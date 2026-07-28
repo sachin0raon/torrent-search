@@ -20,11 +20,18 @@ type Reader interface {
 	SetReadahead(int64)
 }
 
+// TorrentStat carries live peer metrics for one torrent.
+type TorrentStat struct {
+	ConnectedSeeders int
+}
+
 // TorrentFile is one file inside a torrent.
 type TorrentFile interface {
 	Path() string
 	Length() int64
 	NewReader() Reader
+	// BytesCompleted returns how many bytes of this file have been downloaded.
+	BytesCompleted() int64
 }
 
 // Torrent is a single added torrent.
@@ -35,6 +42,8 @@ type Torrent interface {
 	InfoHash() string
 	Name() string
 	Files() []TorrentFile
+	// Stats returns live peer and download metrics for this torrent.
+	Stats() TorrentStat
 	// AddTrackers merges extra trackers (a BEP-12 tiered announce list) into the
 	// torrent to widen peer discovery.
 	AddTrackers(announceList [][]string)
@@ -146,6 +155,10 @@ func (a *anacrolixTorrent) InfoHash() string          { return a.t.InfoHash().He
 func (a *anacrolixTorrent) Name() string              { return a.t.Name() }
 func (a *anacrolixTorrent) AddTrackers(al [][]string) { a.t.AddTrackers(al) }
 func (a *anacrolixTorrent) Drop()                     { a.t.Drop() }
+func (a *anacrolixTorrent) Stats() TorrentStat {
+	s := a.t.Stats()
+	return TorrentStat{ConnectedSeeders: s.ConnectedSeeders}
+}
 
 func (a *anacrolixTorrent) Files() []TorrentFile {
 	files := a.t.Files()
@@ -158,8 +171,9 @@ func (a *anacrolixTorrent) Files() []TorrentFile {
 
 type anacrolixFile struct{ f *torrent.File }
 
-func (a *anacrolixFile) Path() string  { return a.f.Path() }
-func (a *anacrolixFile) Length() int64 { return a.f.Length() }
+func (a *anacrolixFile) Path() string          { return a.f.Path() }
+func (a *anacrolixFile) Length() int64         { return a.f.Length() }
+func (a *anacrolixFile) BytesCompleted() int64 { return a.f.BytesCompleted() }
 func (a *anacrolixFile) NewReader() Reader {
 	r := a.f.NewReader()
 	// Responsive readers prioritise the region currently being read, which is

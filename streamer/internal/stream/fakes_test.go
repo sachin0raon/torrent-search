@@ -13,8 +13,9 @@ type fakeFile struct {
 	data []byte
 }
 
-func (f *fakeFile) Path() string  { return f.path }
-func (f *fakeFile) Length() int64 { return int64(len(f.data)) }
+func (f *fakeFile) Path() string          { return f.path }
+func (f *fakeFile) Length() int64         { return int64(len(f.data)) }
+func (f *fakeFile) BytesCompleted() int64 { return int64(len(f.data)) }
 func (f *fakeFile) NewReader() Reader {
 	return &fakeReader{Reader: bytes.NewReader(f.data)}
 }
@@ -56,6 +57,7 @@ func (t *fakeTorrent) Drop() {
 	t.dropped = true
 	t.mu.Unlock()
 }
+func (t *fakeTorrent) Stats() TorrentStat { return TorrentStat{} }
 func (t *fakeTorrent) wasDropped() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
