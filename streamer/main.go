@@ -19,7 +19,7 @@ import (
 func main() {
 	cfg := stream.LoadConfig()
 
-	client, err := stream.NewAnacrolixClient(cfg.DownloadDir)
+	client, err := stream.NewAnacrolixClient(cfg.DownloadDir, cfg.TorrentPort)
 	if err != nil {
 		log.Fatalf("streamer: failed to start torrent client: %v", err)
 	}

@@ -7,6 +7,11 @@ services:
     ports:
       # Host:container — nginx front door serves SPA, /api, and /stream on 8080.
       - "8000:8080"
+      # BitTorrent peer connections — must be reachable from the internet so peers
+      # can push torrent metadata (BEP-9). Both TCP and UDP are needed: TCP for
+      # peer connections, UDP for DHT and tracker announces.
+      - "6881:6881/tcp"
+      - "6881:6881/udp"
     environment:
       # Required: your TMDB API key (server-side only).
       TMDB_API_KEY: ${TMDB_API_KEY:?set TMDB_API_KEY in your environment or a .env file}
@@ -26,6 +31,8 @@ services:
       # "none" to disable extra trackers.
       STREAM_TRACKERS_URLS: ${STREAM_TRACKERS_URLS:-}
       STREAM_TRACKERS_REFRESH: ${STREAM_TRACKERS_REFRESH:-21600}
+      # Fixed port for BitTorrent peer connections (must match the port mapping above).
+      STREAM_TORRENT_PORT: ${STREAM_TORRENT_PORT:-6881}
     volumes:
       # Persist the runtime forum-base-url override (config.json) across restarts.
       - app_config:/data

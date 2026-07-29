@@ -23,6 +23,8 @@ type Reader interface {
 // TorrentStat carries live peer metrics for one torrent.
 type TorrentStat struct {
 	ConnectedSeeders int
+	ActivePeers      int // connections currently active (including metadata exchange)
+	TotalPeers       int // all known peer addresses (connected + discovered)
 }
 
 // TorrentFile is one file inside a torrent.
@@ -61,13 +63,16 @@ type TorrentClient interface {
 
 type anacrolixClient struct{ c *torrent.Client }
 
-// NewAnacrolixClient builds a real torrent client rooted at dataDir. Seeding
-// and uploads are disabled; this box only leeches for playback.
-func NewAnacrolixClient(dataDir string) (TorrentClient, error) {
+// NewAnacrolixClient builds a real torrent client rooted at dataDir. listenPort
+// must be reachable from the internet (firewall + Docker port mapping) so peers
+// can initiate connections and push torrent metadata. Seeding and uploads are
+// disabled; this box only leeches for playback.
+func NewAnacrolixClient(dataDir string, listenPort int) (TorrentClient, error) {
 	cfg := torrent.NewDefaultClientConfig()
 	cfg.DataDir = dataDir
 	cfg.Seed = false
 	cfg.NoUpload = true
+	cfg.ListenPort = listenPort
 	c, err := torrent.NewClient(cfg)
 	if err != nil {
 		return nil, err
@@ -157,7 +162,11 @@ func (a *anacrolixTorrent) AddTrackers(al [][]string) { a.t.AddTrackers(al) }
 func (a *anacrolixTorrent) Drop()                     { a.t.Drop() }
 func (a *anacrolixTorrent) Stats() TorrentStat {
 	s := a.t.Stats()
-	return TorrentStat{ConnectedSeeders: s.ConnectedSeeders}
+	return TorrentStat{
+		ConnectedSeeders: s.ConnectedSeeders,
+		ActivePeers:      s.ActivePeers,
+		TotalPeers:       s.TotalPeers,
+	}
 }
 
 func (a *anacrolixTorrent) Files() []TorrentFile {

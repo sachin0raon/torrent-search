@@ -31,6 +31,10 @@ type Config struct {
 	TrackersRefresh time.Duration
 	// TrackersTimeout bounds each tracker-list HTTP fetch.
 	TrackersTimeout time.Duration
+	// TorrentPort is the fixed TCP+UDP port the anacrolix torrent client listens
+	// on for peer connections. Must be reachable from the internet (firewall +
+	// Docker port mapping) so peers can initiate connections and push metadata.
+	TorrentPort int
 }
 
 // LoadConfig reads configuration from the environment, applying defaults for
@@ -46,6 +50,7 @@ func LoadConfig() Config {
 		TrackersURLs:    trackerURLs(),
 		TrackersRefresh: envSeconds("STREAM_TRACKERS_REFRESH", 21600), // 6h
 		TrackersTimeout: envSeconds("STREAM_TRACKERS_TIMEOUT", 15),
+		TorrentPort:     envInt("STREAM_TORRENT_PORT", 6881),
 	}
 }
 

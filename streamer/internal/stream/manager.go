@@ -201,12 +201,23 @@ func (m *Manager) awaitInfo(ctx context.Context, s *Session) error {
 		return nil
 	}
 
-	select {
-	case <-s.t.GotInfo():
-		m.populateFiles(s)
-		return nil
-	case <-ctx.Done():
-		return ErrMetadataTimeout
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.t.GotInfo():
+			m.populateFiles(s)
+			return nil
+		case <-ticker.C:
+			st := s.t.Stats()
+			log.Printf("streamer: awaiting metadata session=%s total_peers=%d active_peers=%d seeders=%d",
+				s.ID, st.TotalPeers, st.ActivePeers, st.ConnectedSeeders)
+		case <-ctx.Done():
+			st := s.t.Stats()
+			log.Printf("streamer: metadata timeout session=%s total_peers=%d active_peers=%d seeders=%d",
+				s.ID, st.TotalPeers, st.ActivePeers, st.ConnectedSeeders)
+			return ErrMetadataTimeout
+		}
 	}
 }
 
