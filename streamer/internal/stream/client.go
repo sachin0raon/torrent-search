@@ -73,6 +73,9 @@ func NewAnacrolixClient(dataDir string, listenPort int) (TorrentClient, error) {
 	cfg.Seed = false
 	cfg.NoUpload = true
 	cfg.ListenPort = listenPort
+	// On a server with an open listen port, more simultaneous outbound attempts
+	// means faster time-to-first-connection when most peers are behind NAT.
+	cfg.HalfOpenConnsPerTorrent = 100
 	c, err := torrent.NewClient(cfg)
 	if err != nil {
 		return nil, err
