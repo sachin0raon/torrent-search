@@ -115,9 +115,11 @@ export default function StreamPanel({ magnet }) {
           {error ? (
             <>
               <ErrorBanner message={error} onDismiss={() => setError('')} />
-              <button onClick={() => setAttempt((a) => a + 1)}><RefreshCw size={14} />Retry</button>
+              <button style={{ width: 'fit-content' }} onClick={() => setAttempt((a) => a + 1)}><RefreshCw size={14} />Retry</button>
             </>
-          ) : session?.files.length === 0 ? (
+          ) : !session ? (
+            <button style={{ width: 'fit-content' }} onClick={() => setAttempt((a) => a + 1)}><RefreshCw size={14} />Retry</button>
+          ) : session.files.length === 0 ? (
             <div className="empty">No files in this torrent.</div>
           ) : (
             session.files.map((f) => (
