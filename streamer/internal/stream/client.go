@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/anacrolix/torrent"
 )
@@ -61,13 +62,17 @@ type TorrentClient interface {
 
 // --- anacrolix/torrent adapter ---
 
-type anacrolixClient struct{ c *torrent.Client }
+type anacrolixClient struct {
+	c       *torrent.Client
+	stopDHT func() // stops the DHT state saver goroutine and flushes a final save
+}
 
 // NewAnacrolixClient builds a real torrent client rooted at dataDir. listenPort
 // must be reachable from the internet (firewall + Docker port mapping) so peers
-// can initiate connections and push torrent metadata. Seeding and uploads are
-// disabled; this box only leeches for playback.
-func NewAnacrolixClient(dataDir string, listenPort int) (TorrentClient, error) {
+// can initiate connections and push torrent metadata. dhtStateFile is the path
+// where the DHT routing table is persisted between restarts (empty = disabled).
+// Seeding and uploads are disabled; this box only leeches for playback.
+func NewAnacrolixClient(dataDir string, listenPort int, dhtStateFile string) (TorrentClient, error) {
 	cfg := torrent.NewDefaultClientConfig()
 	cfg.DataDir = dataDir
 	cfg.Seed = false
@@ -76,11 +81,28 @@ func NewAnacrolixClient(dataDir string, listenPort int) (TorrentClient, error) {
 	// On a server with an open listen port, more simultaneous outbound attempts
 	// means faster time-to-first-connection when most peers are behind NAT.
 	cfg.HalfOpenConnsPerTorrent = 100
+	// uTP (UDP-based transport) bypasses VPS-level TCP throttling of BitTorrent
+	// traffic. UDP is confirmed unblocked. Risk: drops TCP-only peers, but
+	// virtually all modern clients support uTP. Revert if connections get worse.
+	cfg.DisableTCP = true
+	// Prefer MSE/PE header obfuscation so the BitTorrent handshake is not
+	// detectable by plain-text DPI. Non-obfuscated peers are still accepted.
+	cfg.HeaderObfuscationPolicy = torrent.HeaderObfuscationPolicy{
+		Preferred:        true,
+		RequirePreferred: false,
+	}
+	if dhtStateFile != "" {
+		cfg.DhtStartingNodes = dhtStartingNodes(dhtStateFile)
+	}
 	c, err := torrent.NewClient(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return &anacrolixClient{c: c}, nil
+	a := &anacrolixClient{c: c}
+	if dhtStateFile != "" {
+		a.stopDHT = startDHTStateSaver(c, dhtStateFile, 5*time.Minute)
+	}
+	return a, nil
 }
 
 func (a *anacrolixClient) AddMagnet(uri string) (t Torrent, err error) {
@@ -154,7 +176,12 @@ func sanitizeMagnet(raw string) string {
 	return raw[:qIdx+1] + q.Encode()
 }
 
-func (a *anacrolixClient) Close() { a.c.Close() }
+func (a *anacrolixClient) Close() {
+	if a.stopDHT != nil {
+		a.stopDHT()
+	}
+	a.c.Close()
+}
 
 type anacrolixTorrent struct{ t *torrent.Torrent }
 

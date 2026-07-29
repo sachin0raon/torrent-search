@@ -35,6 +35,10 @@ type Config struct {
 	// on for peer connections. Must be reachable from the internet (firewall +
 	// Docker port mapping) so peers can initiate connections and push metadata.
 	TorrentPort int
+	// DHTStateFile is the path where the DHT routing table is persisted between
+	// restarts. Empty string disables persistence. Defaults to the persistent
+	// data volume so the routing table survives container restarts.
+	DHTStateFile string
 }
 
 // LoadConfig reads configuration from the environment, applying defaults for
@@ -50,7 +54,8 @@ func LoadConfig() Config {
 		TrackersURLs:    trackerURLs(),
 		TrackersRefresh: envSeconds("STREAM_TRACKERS_REFRESH", 21600), // 6h
 		TrackersTimeout: envSeconds("STREAM_TRACKERS_TIMEOUT", 15),
-		TorrentPort:     envInt("STREAM_TORRENT_PORT", 6881),
+		TorrentPort:  envInt("STREAM_TORRENT_PORT", 6881),
+		DHTStateFile: envStr("STREAM_DHT_STATE_FILE", "/data/dht-state.json"),
 	}
 }
 

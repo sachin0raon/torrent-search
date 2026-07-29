@@ -37,9 +37,7 @@ function FileRow({ session, file }) {
           <span className="fname">{name}</span>
           <div className="stream-file-actions">
             <span className="notice">{formatSize(file.size)}</span>
-            <a href={downloadUrl} download={name} rel="noreferrer">
-              <button className="player-btn">Download</button>
-            </a>
+            <CopyButton value={downloadUrl} label="Copy link" className="" />
           </div>
         </div>
       </div>

@@ -173,8 +173,9 @@ func (m *Manager) AddSession(ctx context.Context, magnet string) (*Session, erro
 	m.addTrackers(s)
 
 	if err := m.awaitInfo(ctx, s); err != nil {
-		log.Printf("streamer: metadata timeout session=%s infohash=%s", s.ID, ih)
-		m.remove(s)
+		// Keep the session alive so a retry immediately reuses this torrent,
+		// which has already built up DHT peers and started receiving inbound
+		// connections. The idle GC will evict it if nobody retries.
 		return nil, err
 	}
 	log.Printf("streamer: session %s ready name=%q files=%d", s.ID, s.Name, len(s.files))
@@ -214,7 +215,7 @@ func (m *Manager) awaitInfo(ctx context.Context, s *Session) error {
 				s.ID, st.TotalPeers, st.ActivePeers, st.ConnectedSeeders)
 		case <-ctx.Done():
 			st := s.t.Stats()
-			log.Printf("streamer: metadata timeout session=%s total_peers=%d active_peers=%d seeders=%d",
+			log.Printf("streamer: metadata timeout session=%s total_peers=%d active_peers=%d seeders=%d (torrent kept alive for retry)",
 				s.ID, st.TotalPeers, st.ActivePeers, st.ConnectedSeeders)
 			return ErrMetadataTimeout
 		}
