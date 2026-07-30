@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -171,6 +172,7 @@ func (m *Manager) AddSession(ctx context.Context, magnet string) (*Session, erro
 	// Widen peer discovery before waiting for metadata, so the extra trackers
 	// help fetch the info dict too.
 	m.addTrackers(s)
+	go m.proactiveAnnounce(s)
 
 	if err := m.awaitInfo(ctx, s); err != nil {
 		// Keep the session alive so a retry immediately reuses this torrent,
@@ -180,6 +182,33 @@ func (m *Manager) AddSession(ctx context.Context, magnet string) (*Session, erro
 	}
 	log.Printf("streamer: session %s ready name=%q files=%d", s.ID, s.Name, len(s.files))
 	return s, nil
+}
+
+// proactiveAnnounce fires HTTP announces to public trackers immediately after a
+// session is created, then injects the returned peer addresses directly into
+// the torrent. This gives anacrolix a warm peer list without waiting for the
+// DHT cold-start, accelerating both metadata fetch and streaming.
+func (m *Manager) proactiveAnnounce(s *Session) {
+	if m.trackers == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var urls []string
+	for _, tier := range m.trackers.Tiers() {
+		urls = append(urls, tier...)
+	}
+
+	peers := announcePeers(ctx, s.Infohash, uint16(m.cfg.TorrentPort), urls)
+	if len(peers) == 0 {
+		return
+	}
+
+	type peerAdder interface{ AddPeers([]net.UDPAddr) }
+	if ap, ok := s.t.(peerAdder); ok {
+		ap.AddPeers(peers)
+	}
 }
 
 // addTrackers merges the provider's trackers into a new torrent, if configured.

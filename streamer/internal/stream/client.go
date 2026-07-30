@@ -3,6 +3,7 @@ package stream
 import (
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -199,6 +200,17 @@ func (a *anacrolixTorrent) Stats() TorrentStat {
 		ActivePeers:      s.ActivePeers,
 		TotalPeers:       s.TotalPeers,
 	}
+}
+
+func (a *anacrolixTorrent) AddPeers(peers []net.UDPAddr) {
+	pp := make([]torrent.PeerInfo, 0, len(peers))
+	for i := range peers {
+		pp = append(pp, torrent.PeerInfo{
+			Addr:   &peers[i],
+			Source: torrent.PeerSourceTracker,
+		})
+	}
+	a.t.AddPeers(pp)
 }
 
 func (a *anacrolixTorrent) Files() []TorrentFile {

@@ -111,14 +111,17 @@ func TestAddSession_MetadataTimeout(t *testing.T) {
 	if !errors.Is(err, ErrMetadataTimeout) {
 		t.Fatalf("expected ErrMetadataTimeout, got %v", err)
 	}
+	// The session is intentionally kept alive after a timeout so that a retry
+	// can immediately reuse the torrent (which has already accumulated DHT peers
+	// and tracker connections). The idle GC will evict it if nobody retries.
 	mgr.mu.Lock()
 	n := len(mgr.sessions)
 	mgr.mu.Unlock()
-	if n != 0 {
-		t.Errorf("timed-out session should be removed, got %d", n)
+	if n != 1 {
+		t.Errorf("timed-out session should remain in manager for retry, got %d", n)
 	}
-	if tor := client.byIH["SLOW"]; tor == nil || !tor.wasDropped() {
-		t.Error("timed-out torrent should be dropped")
+	if tor := client.byIH["SLOW"]; tor == nil || tor.wasDropped() {
+		t.Error("timed-out torrent should be kept alive for retry")
 	}
 }
 
