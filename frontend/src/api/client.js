@@ -39,18 +39,26 @@ export const api = {
   tvSeasons: (tmdbId, signal) =>
     request(`/api/tv-seasons?${qs({ tmdb_id: tmdbId })}`, { signal }),
 
-  streams: ({ imdbId, mediaType, rawQuery, season, episode, skipTorrentio }, signal) =>
+  torrentio: ({ imdbId, mediaType, season, episode }, signal) =>
     request(
-      `/api/streams?${qs({
-        imdb_id: imdbId,
-        media_type: mediaType,
-        raw_query: rawQuery,
-        season,
-        episode,
-        skip_torrentio: skipTorrentio,
-      })}`,
+      `/api/torrentio?${qs({ imdb_id: imdbId, media_type: mediaType, season, episode })}`,
       { signal },
     ),
+
+  comet: ({ imdbId, mediaType, season, episode }, signal) =>
+    request(
+      `/api/comet?${qs({ imdb_id: imdbId, media_type: mediaType, season, episode })}`,
+      { signal },
+    ),
+
+  meteor: ({ imdbId, mediaType, season, episode }, signal) =>
+    request(
+      `/api/meteor?${qs({ imdb_id: imdbId, media_type: mediaType, season, episode })}`,
+      { signal },
+    ),
+
+  forumSearch: ({ rawQuery }, signal) =>
+    request(`/api/forum/search?${qs({ raw_query: rawQuery })}`, { signal }),
 
   discover: ({ category, mediaType, page }, signal) =>
     request(

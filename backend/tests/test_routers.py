@@ -207,8 +207,7 @@ def test_discover_pagination_maps_two_ui_pages_to_one_tmdb_page(client):
 
 
 @respx.mock
-def test_streams_partial_failure(client):
-    # torrentio OK, forum fails -> partial result, forum ok=False.
+def test_torrentio_endpoint_ok(client):
     respx.get(url__regex=r"https://torrentio\.strem\.fun/.*").mock(
         return_value=httpx.Response(
             200,
@@ -219,40 +218,135 @@ def test_streams_partial_failure(client):
             },
         )
     )
-    respx.get(url__regex=r"https://forum\.tld/search/api/search\.php.*").mock(
-        return_value=httpx.Response(500)
-    )
-
     resp = client.get(
-        "/api/streams",
-        params={"imdb_id": "tt1", "media_type": "movie", "raw_query": "movie"},
+        "/api/torrentio",
+        params={"imdb_id": "tt1", "media_type": "movie"},
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["torrentio"]["ok"] is True
-    assert len(body["torrentio"]["items"]) == 1
-    assert body["forum"]["ok"] is False
-    assert body["forum"]["error"]
+    assert body["ok"] is True
+    assert len(body["items"]) == 1
 
 
 @respx.mock
-def test_streams_skips_torrentio_without_imdb(client):
+def test_torrentio_endpoint_upstream_failure(client):
+    respx.get(url__regex=r"https://torrentio\.strem\.fun/.*").mock(
+        return_value=httpx.Response(500)
+    )
+    resp = client.get("/api/torrentio", params={"imdb_id": "tt1", "media_type": "movie"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error"]
+
+
+def test_torrentio_endpoint_skips_without_imdb(client):
+    resp = client.get("/api/torrentio", params={"media_type": "movie"})
+    body = resp.json()
+    assert body["ok"] is False
+    assert "IMDb" in body["error"]
+
+
+@respx.mock
+def test_comet_endpoint_ok(client):
+    respx.get(url__regex=r"https://comet\.feels\.legal/.*").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "streams": [
+                    {"description": "📄 Movie\n👤 10 💾 1 GB 🔎 Knaben", "infoHash": "HASH1"},
+                ]
+            },
+        )
+    )
+    resp = client.get("/api/comet", params={"imdb_id": "tt1", "media_type": "movie"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert len(body["items"]) == 1
+
+
+def test_comet_endpoint_skips_without_imdb(client):
+    resp = client.get("/api/comet", params={"media_type": "movie"})
+    body = resp.json()
+    assert body["ok"] is False
+    assert "IMDb" in body["error"]
+
+
+@respx.mock
+def test_comet_endpoint_upstream_error(client):
+    respx.get(url__regex=r"https://comet\.feels\.legal/.*").mock(
+        return_value=httpx.Response(405)
+    )
+    resp = client.get("/api/comet", params={"imdb_id": "tt1", "media_type": "movie"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert "405" in body["error"]
+
+
+@respx.mock
+def test_meteor_endpoint_ok(client):
+    respx.get(url__regex=r"https://meteorfortheweebs\.midnightignite\.me/.*").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "streams": [
+                    {"description": "📄 Movie\n📺 1080p\n💾 1 GB", "infoHash": "HASH1"},
+                ]
+            },
+        )
+    )
+    resp = client.get("/api/meteor", params={"imdb_id": "tt1", "media_type": "movie"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert len(body["items"]) == 1
+
+
+def test_meteor_endpoint_skips_without_imdb(client):
+    resp = client.get("/api/meteor", params={"media_type": "movie"})
+    body = resp.json()
+    assert body["ok"] is False
+    assert "IMDb" in body["error"]
+
+
+@respx.mock
+def test_meteor_endpoint_upstream_error(client):
+    respx.get(url__regex=r"https://meteorfortheweebs\.midnightignite\.me/.*").mock(
+        return_value=httpx.Response(502)
+    )
+    resp = client.get("/api/meteor", params={"imdb_id": "tt1", "media_type": "movie"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert "502" in body["error"]
+
+
+@respx.mock
+def test_forum_search_ok(client):
     respx.get(url__regex=r"https://forum\.tld/search/api/search\.php.*").mock(
         return_value=httpx.Response(200, json={"results": [{"tid": 5, "title": "A Title"}]})
     )
-    resp = client.get(
-        "/api/streams",
-        params={"media_type": "movie", "raw_query": "movie"},
-    )
+    resp = client.get("/api/forum/search", params={"raw_query": "movie"})
     body = resp.json()
-    assert body["torrentio"]["ok"] is False
-    assert "IMDb" in body["torrentio"]["error"]
-    assert body["forum"]["ok"] is True
-    assert body["forum"]["items"][0]["topic_url"].endswith("/topic/5-a-title/")
+    assert body["ok"] is True
+    assert body["items"][0]["topic_url"].endswith("/topic/5-a-title/")
 
 
 @respx.mock
-def test_streams_auto_updates_forum_base_on_redirect(client):
+def test_forum_search_upstream_failure(client):
+    respx.get(url__regex=r"https://forum\.tld/search/api/search\.php.*").mock(
+        return_value=httpx.Response(500)
+    )
+    resp = client.get("/api/forum/search", params={"raw_query": "movie"})
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error"]
+
+
+@respx.mock
+def test_forum_search_auto_updates_forum_base_on_redirect(client):
     # Old domain 301-redirects to a new domain that serves valid search JSON.
     respx.get(url__regex=r"https://forum\.tld/search/api/search\.php.*").mock(
         return_value=httpx.Response(
@@ -263,13 +357,13 @@ def test_streams_auto_updates_forum_base_on_redirect(client):
         return_value=httpx.Response(200, json={"results": [{"tid": 7, "title": "New Title"}]})
     )
 
-    resp = client.get("/api/streams", params={"media_type": "movie", "raw_query": "x"})
+    resp = client.get("/api/forum/search", params={"raw_query": "x"})
     body = resp.json()
 
     assert body["forum_base_updated"] == "https://new-forum.tld"
-    assert body["forum"]["ok"] is True
+    assert body["ok"] is True
     # Topic URLs are rebuilt against the new origin.
-    assert body["forum"]["items"][0]["topic_url"].startswith("https://new-forum.tld/index.php")
+    assert body["items"][0]["topic_url"].startswith("https://new-forum.tld/index.php")
 
     # The new base URL is persisted (config source becomes "config").
     cfg = client.get("/api/config").json()

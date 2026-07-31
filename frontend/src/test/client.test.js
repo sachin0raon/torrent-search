@@ -23,10 +23,11 @@ describe('api client', () => {
     );
   });
 
-  it('omits empty season/episode from streams URL', async () => {
-    global.fetch = mockFetch(200, { torrentio: {}, forum: {} });
-    await api.streams({ imdbId: 'tt1', mediaType: 'movie', rawQuery: 'x' });
+  it('omits empty season/episode from the torrentio URL', async () => {
+    global.fetch = mockFetch(200, { ok: true, error: null, items: [] });
+    await api.torrentio({ imdbId: 'tt1', mediaType: 'movie' });
     const calledUrl = global.fetch.mock.calls[0][0];
+    expect(calledUrl).toContain('/api/torrentio?');
     expect(calledUrl).toContain('imdb_id=tt1');
     expect(calledUrl).toContain('media_type=movie');
     expect(calledUrl).not.toContain('season=');
@@ -34,11 +35,23 @@ describe('api client', () => {
   });
 
   it('includes season/episode when provided', async () => {
-    global.fetch = mockFetch(200, {});
-    await api.streams({ imdbId: 'tt1', mediaType: 'tv', rawQuery: 'x', season: 2, episode: 5 });
+    global.fetch = mockFetch(200, { ok: true, error: null, items: [] });
+    await api.torrentio({ imdbId: 'tt1', mediaType: 'tv', season: 2, episode: 5 });
     const calledUrl = global.fetch.mock.calls[0][0];
     expect(calledUrl).toContain('season=2');
     expect(calledUrl).toContain('episode=5');
+  });
+
+  it('builds independent comet/meteor/forumSearch URLs', async () => {
+    global.fetch = mockFetch(200, { ok: true, error: null, items: [] });
+    await api.comet({ imdbId: 'tt1', mediaType: 'movie' });
+    expect(global.fetch.mock.calls[0][0]).toContain('/api/comet?');
+
+    await api.meteor({ imdbId: 'tt1', mediaType: 'movie' });
+    expect(global.fetch.mock.calls[1][0]).toContain('/api/meteor?');
+
+    await api.forumSearch({ rawQuery: 'the matrix' });
+    expect(global.fetch.mock.calls[2][0]).toBe('/api/forum/search?raw_query=the+matrix');
   });
 
   it('builds discover URL with category/media_type/page', async () => {

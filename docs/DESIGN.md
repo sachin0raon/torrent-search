@@ -29,6 +29,12 @@
 > container now runs three processes (nginx + uvicorn + Go streamer) behind a single
 > nginx front door; the public port is still 8000 (host) but nginx now listens on
 > 8080 inside the container. See [STREAMING.md](STREAMING.md) for the full design.
+>
+> **Update (2026-07-31):** added two more torrent-scraper sources, **Comet** and
+> **Meteor**, each its own results tab (order: Comet, Meteor, Forum, Torrentio),
+> each with an independent client/server fetch toggle and independent retry. The
+> bundled `/api/streams` endpoint is split into four independent per-source
+> endpoints. See [SCRAPERS.md](SCRAPERS.md) for the full design.
 
 ---
 

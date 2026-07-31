@@ -19,7 +19,7 @@ from app.config import (
     get_forum_base_url,
     get_forum_probe_settings,
 )
-from app.routers import discover, forum, search, settings, streams
+from app.routers import comet, discover, forum, meteor, search, settings, torrentio
 from app.services.scheduler import create_scheduler
 
 
@@ -114,7 +114,9 @@ app.add_middleware(
 
 # API routers are registered before the static mount so /api/* always wins.
 app.include_router(search.router)
-app.include_router(streams.router)
+app.include_router(torrentio.router)
+app.include_router(comet.router)
+app.include_router(meteor.router)
 app.include_router(forum.router)
 app.include_router(settings.router)
 app.include_router(discover.router)

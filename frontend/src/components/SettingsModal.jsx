@@ -4,6 +4,8 @@ import { Save, X } from 'lucide-react';
 import { api } from '../api/client.js';
 import ErrorBanner from './ErrorBanner.jsx';
 import { getTorrentioMode, setTorrentioMode } from '../torrentioMode.js';
+import { getCometMode, setCometMode } from '../cometMode.js';
+import { getMeteorMode, setMeteorMode } from '../meteorMode.js';
 import { spring } from '../motion.js';
 
 // Edit the configurable forum base URL. Reads current value (env or config)
@@ -14,13 +16,28 @@ export default function SettingsModal({ onClose, onSaved }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [torrentioMode, setTorrentioModeState] = useState(() => getTorrentioMode());
+  const [cometMode, setCometModeState] = useState(() => getCometMode());
+  const [meteorMode, setMeteorModeState] = useState(() => getMeteorMode());
 
-  // Persist the Torrentio source toggle immediately (it's client-only, so it
-  // takes effect on the next search regardless of the forum-URL Save button).
+  // Persist each source toggle immediately (they're client-only, so they take
+  // effect on the next search regardless of the forum-URL Save button). Each
+  // source is independent — flipping one doesn't affect the others.
   function onToggleMode(e) {
     const mode = e.target.checked ? 'client' : 'server';
     setTorrentioModeState(mode);
     setTorrentioMode(mode);
+  }
+
+  function onToggleCometMode(e) {
+    const mode = e.target.checked ? 'client' : 'server';
+    setCometModeState(mode);
+    setCometMode(mode);
+  }
+
+  function onToggleMeteorMode(e) {
+    const mode = e.target.checked ? 'client' : 'server';
+    setMeteorModeState(mode);
+    setMeteorMode(mode);
   }
 
   useEffect(() => {
@@ -95,6 +112,36 @@ export default function SettingsModal({ onClose, onSaved }) {
           {torrentioMode === 'client'
             ? 'Client-side: uses your home IP. Best when the server is blocked (403).'
             : 'Server-side: the backend fetches Torrentio.'}
+        </span>
+
+        <h2 className="modal-subtitle">Comet source</h2>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={cometMode === 'client'}
+            onChange={onToggleCometMode}
+          />
+          <span>Fetch Comet directly in my browser</span>
+        </label>
+        <span className="source-note">
+          {cometMode === 'client'
+            ? 'Client-side: uses your home IP. Best when the server is blocked.'
+            : 'Server-side: the backend fetches Comet.'}
+        </span>
+
+        <h2 className="modal-subtitle">Meteor source</h2>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={meteorMode === 'client'}
+            onChange={onToggleMeteorMode}
+          />
+          <span>Fetch Meteor directly in my browser</span>
+        </label>
+        <span className="source-note">
+          {meteorMode === 'client'
+            ? 'Client-side: uses your home IP. Best when the server is blocked.'
+            : 'Server-side: the backend fetches Meteor.'}
         </span>
 
         <ErrorBanner message={error} onDismiss={() => setError('')} />

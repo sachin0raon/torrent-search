@@ -30,6 +30,19 @@ RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 RETRYABLE_EXC = (httpx.TransportError, httpx.TimeoutException, httpx.HTTPStatusError)
 
 
+def error_message(exc: Exception) -> str:
+    """Map an outbound-call exception to a short, user-facing string.
+
+    Shared by every per-source router (torrentio/comet/meteor/forum) so a
+    timeout, upstream error, or anything else reads consistently across tabs.
+    """
+    if isinstance(exc, httpx.TimeoutException):
+        return "timed out"
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"upstream returned {exc.response.status_code}"
+    return str(exc) or exc.__class__.__name__
+
+
 async def get_with_retry(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
     """GET `url` with retries. Returns the response (2xx or non-retryable status).
 

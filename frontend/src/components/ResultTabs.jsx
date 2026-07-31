@@ -7,7 +7,16 @@ import ErrorBanner from './ErrorBanner.jsx';
 import ForumTopicRow from './ForumTopicRow.jsx';
 import { spring, staggerContainer, staggerItem, collapsePanel } from '../motion.js';
 
-// Shared plain-glass retry control for per-source failures (Torrentio / Forum).
+// Torrent sources (Comet/Meteor/Torrentio) share this row shape once parsed;
+// Forum's row (ForumTopicRow) is genuinely different, so it stays separate.
+const TAB_ORDER = [
+  { key: 'comet', label: 'Comet' },
+  { key: 'meteor', label: 'Meteor' },
+  { key: 'forum', label: 'Forum' },
+  { key: 'torrentio', label: 'Torrentio' },
+];
+
+// Shared plain-glass retry control for per-source failures.
 function RetryButton({ onRetry, retrying }) {
   if (!onRetry) return null;
   return (
@@ -18,7 +27,34 @@ function RetryButton({ onRetry, retrying }) {
   );
 }
 
-function TorrentioRow({ item }) {
+// Loading/error/empty branches shared by every source's tab. Returns null
+// when the caller should render the actual items (ok, with results).
+function renderSourceState(result, sourceLabel, onRetry) {
+  // Only the very first fetch for a source has loading=true with no error yet
+  // (a retry-in-flight keeps the prior error around — see App.jsx's
+  // fetchTorrentSource/fetchForumSource — so it falls through to the error
+  // branch below instead, showing "Retrying…" on the existing banner).
+  if (result.loading && result.error == null) {
+    return <div className="spinner">Fetching {sourceLabel}…</div>;
+  }
+  // Guard on an actual error message (not just !ok) so an untouched/idle
+  // result — e.g. { ok: false, error: null, items: [] } — falls through to
+  // the empty-state branch below instead of rendering "{label}: null".
+  if (!result.ok && result.error) {
+    return (
+      <div>
+        <ErrorBanner message={`${sourceLabel}: ${result.error}`} />
+        <RetryButton onRetry={onRetry} retrying={result.loading} />
+      </div>
+    );
+  }
+  if (!result.items.length) {
+    return <div className="empty">No {sourceLabel.toLowerCase()} results.</div>;
+  }
+  return null;
+}
+
+function TorrentRow({ item }) {
   const [streamOpen, setStreamOpen] = useState(false);
   return (
     <motion.div className="result-row" variants={staggerItem} whileHover={{ y: -2 }}>
@@ -50,39 +86,21 @@ function TorrentioRow({ item }) {
   );
 }
 
-function TorrentioTab({ result, onRetry, retrying }) {
-  if (!result.ok) {
-    return (
-      <div>
-        <ErrorBanner message={`Torrentio: ${result.error}`} />
-        <RetryButton onRetry={onRetry} retrying={retrying} />
-      </div>
-    );
-  }
-  if (!result.items.length) {
-    return <div className="empty">No torrentio results.</div>;
-  }
+function TorrentTab({ result, sourceLabel, onRetry }) {
+  const state = renderSourceState(result, sourceLabel, onRetry);
+  if (state) return state;
   return (
     <motion.div variants={staggerContainer} initial="initial" animate="animate">
       {result.items.map((item) => (
-        <TorrentioRow key={item.magnet} item={item} />
+        <TorrentRow key={item.magnet} item={item} />
       ))}
     </motion.div>
   );
 }
 
-function ForumTab({ result, onRetry, retrying }) {
-  if (!result.ok) {
-    return (
-      <div>
-        <ErrorBanner message={`Forum: ${result.error}`} />
-        <RetryButton onRetry={onRetry} retrying={retrying} />
-      </div>
-    );
-  }
-  if (!result.items.length) {
-    return <div className="empty">No forum results.</div>;
-  }
+function ForumTab({ result, onRetry }) {
+  const state = renderSourceState(result, 'Forum', onRetry);
+  if (state) return state;
   return (
     <motion.div variants={staggerContainer} initial="initial" animate="animate">
       {result.items.map((item) => (
@@ -94,37 +112,48 @@ function ForumTab({ result, onRetry, retrying }) {
   );
 }
 
-export default function ResultTabs({ streams, onRetry, retrying, forumOnly = false }) {
-  const [tab, setTab] = useState(forumOnly ? 'forum' : 'torrentio');
+export default function ResultTabs({
+  sources,
+  forumOnly = false,
+  onRetryTorrentio,
+  onRetryComet,
+  onRetryMeteor,
+  onRetryForum,
+}) {
+  const [tab, setTab] = useState(forumOnly ? 'forum' : 'comet');
 
   // Forum-only search (no title/imdb): render just the forum results — no
-  // Torrentio tab, since there's nothing to search it with.
+  // other tabs, since there's nothing to search them with.
   if (forumOnly) {
-    return <ForumTab result={streams.forum} onRetry={onRetry} retrying={retrying} />;
+    return <ForumTab result={sources.forum} onRetry={onRetryForum} />;
   }
 
-  const tCount = streams.torrentio.ok ? streams.torrentio.items.length : 0;
-  const fCount = streams.forum.ok ? streams.forum.items.length : 0;
+  const retryFns = {
+    comet: onRetryComet,
+    meteor: onRetryMeteor,
+    forum: onRetryForum,
+    torrentio: onRetryTorrentio,
+  };
+  const activeLabel = TAB_ORDER.find((t) => t.key === tab).label;
 
   return (
     <div>
       <div className="tabs" role="tablist">
-        <button
-          role="tab"
-          className={`tab ${tab === 'torrentio' ? 'active' : ''}`}
-          aria-selected={tab === 'torrentio'}
-          onClick={() => setTab('torrentio')}
-        >
-          Torrentio<span className="count">{tCount}</span>
-        </button>
-        <button
-          role="tab"
-          className={`tab ${tab === 'forum' ? 'active' : ''}`}
-          aria-selected={tab === 'forum'}
-          onClick={() => setTab('forum')}
-        >
-          Forum<span className="count">{fCount}</span>
-        </button>
+        {TAB_ORDER.map(({ key, label }) => {
+          const result = sources[key];
+          const count = result?.ok ? result.items.length : 0;
+          return (
+            <button
+              key={key}
+              role="tab"
+              className={`tab ${tab === key ? 'active' : ''}`}
+              aria-selected={tab === key}
+              onClick={() => setTab(key)}
+            >
+              {label}<span className="count">{count}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Keyed panel re-mounts on tab change: new content is in the DOM immediately,
@@ -135,10 +164,10 @@ export default function ResultTabs({ streams, onRetry, retrying, forumOnly = fal
         animate={{ opacity: 1, y: 0 }}
         transition={spring}
       >
-        {tab === 'torrentio' ? (
-          <TorrentioTab result={streams.torrentio} onRetry={onRetry} retrying={retrying} />
+        {tab === 'forum' ? (
+          <ForumTab result={sources.forum} onRetry={onRetryForum} />
         ) : (
-          <ForumTab result={streams.forum} />
+          <TorrentTab result={sources[tab]} sourceLabel={activeLabel} onRetry={retryFns[tab]} />
         )}
       </motion.div>
     </div>

@@ -1,0 +1,42 @@
+{
+  "streams": [
+    {
+      "name": "[TORRENT🧲] Comet 2160p",
+      "description": "📄 How.to.Make.a.Killing.2026.2160p.UHD.Blu-ray.Hybrid.Remux.DV.HDR10P.TYMBLER.mkv\n👤 42 💾 62.9 GB 🔎 Knaben",
+      "behaviorHints": {
+        "bingeGroup": "comet|torrent|c289ad5e75cfa17006b69985436e246995bd734f",
+        "filename": "How.to.Make.a.Killing.2026.2160p.UHD.Blu-ray.Hybrid.Remux.DV.HDR10P.TYMBLER.mkv",
+        "videoSize": 67491973804
+      },
+      "infoHash": "c289ad5e75cfa17006b69985436e246995bd734f",
+      "fileIdx": 0,
+      "sources": [
+        "tracker:udp://opentor.net:6969",
+        "tracker:udp://tracker.publictracker.xyz:6969/announce",
+        "dht:c289ad5e75cfa17006b69985436e246995bd734f"
+      ]
+    },
+    {
+      "name": "[TORRENT🧲] Comet 2160p",
+      "description": "📄 How.to.Make.a.Killing.2026.2160p.UHD.Blu-ray.Remux.DV.HDR.HEVC.TrueHD.Atmos.7.1-CiNEPHiLES.mkv\n💾 61.6 GB 🔎 StremThru",
+      "behaviorHints": {
+        "bingeGroup": "comet|torrent|b8fde7cf655afd7459a54b19233275467daf4304",
+        "filename": "How.to.Make.a.Killing.2026.2160p.UHD.Blu-ray.Remux.DV.HDR.HEVC.TrueHD.Atmos.7.1-CiNEPHiLES.mkv",
+        "videoSize": 66185321222
+      },
+      "infoHash": "b8fde7cf655afd7459a54b19233275467daf4304",
+      "fileIdx": 0
+    },
+    {
+      "name": "[TORRENT🧲] Comet 1080p",
+      "description": "📄 How.to.Make.a.Killing.2026.1080p.WEB.h264\n👤 5 💾 5.45 GiB 🔎 ETHEL",
+      "behaviorHints": {
+        "filename": "How.to.Make.a.Killing.2026.1080p.WEB.h264"
+      },
+      "infoHash": "710d6257964361671a03fd4ab968a4dddae9a040",
+      "sources": [
+        "tracker:udp://tracker.opentrackr.org:1337/announce"
+      ]
+    }
+  ]
+}

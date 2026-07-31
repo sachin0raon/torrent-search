@@ -1,0 +1,31 @@
+{
+  "streams": [
+    {
+      "name": "[P2P☁️] Meteor\n720p",
+      "description": "📄 How To Make A Killing (2026) [720p] [WEBRip] [YTS.BZ]\n📺 720p | webrip\n💾 969 MiB",
+      "infoHash": "bac40d5cd3a67bb3659b14ad694776f8f0341d09",
+      "sources": [
+        "dht:bac40d5cd3a67bb3659b14ad694776f8f0341d09",
+        "tracker:udp://tracker.opentrackr.org:1337/announce",
+        "tracker:udp://open.tracker.cl:1337/announce"
+      ],
+      "behaviorHints": {
+        "bingeGroup": "meteor|720p|webrip|",
+        "videoSize": 1015665122
+      }
+    },
+    {
+      "name": "[P2P☁️] Meteor\n1080p",
+      "description": "📄 How.To.Make.a.Killing.2026.1080p.WEB.h264-ETHEL\n📺 1080p | webdl | h264\n💾 5.45 GiB",
+      "infoHash": "710d6257964361671a03fd4ab968a4dddae9a040",
+      "sources": [
+        "dht:710d6257964361671a03fd4ab968a4dddae9a040",
+        "tracker:udp://tracker.opentrackr.org:1337/announce"
+      ],
+      "behaviorHints": {
+        "bingeGroup": "meteor|1080p|webdl|ETHEL",
+        "videoSize": 5853827165
+      }
+    }
+  ]
+}

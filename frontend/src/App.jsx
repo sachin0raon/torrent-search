@@ -3,7 +3,11 @@ import { useSessions } from './sessionContext.jsx';
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { api } from './api/client.js';
 import * as clientTorrentio from './api/torrentio.js';
+import * as clientComet from './api/comet.js';
+import * as clientMeteor from './api/meteor.js';
 import { getTorrentioMode } from './torrentioMode.js';
+import { getCometMode } from './cometMode.js';
+import { getMeteorMode } from './meteorMode.js';
 import { getActiveDiscoverBadge, setActiveDiscoverBadge } from './discoverSectionState.js';
 import SearchBar from './components/SearchBar.jsx';
 import DiscoverSection from './components/DiscoverSection.jsx';
@@ -16,6 +20,17 @@ import Toast from './components/Toast.jsx';
 import ScrollToTopButton from './components/ScrollToTopButton.jsx';
 import { fadeUp, spring } from './motion.js';
 
+const EMPTY_SOURCE = { ok: false, error: null, items: [], loading: false };
+
+// Each torrent source is fetched independently (own backend endpoint, own
+// client-side module, own client/server mode toggle), so one slow/failed
+// source never blocks or affects the others' results or retry.
+const TORRENT_SOURCES = {
+  torrentio: { backendCall: api.torrentio, clientModule: clientTorrentio, modeGetter: getTorrentioMode },
+  comet: { backendCall: api.comet, clientModule: clientComet, modeGetter: getCometMode },
+  meteor: { backendCall: api.meteor, clientModule: clientMeteor, modeGetter: getMeteorMode },
+};
+
 // Wizard stages: search -> select title -> (tv) pick episode -> streams.
 export default function App() {
   const [rawQuery, setRawQuery] = useState('');
@@ -23,9 +38,11 @@ export default function App() {
   const [selected, setSelected] = useState(null); // TitleResult
   const [imdbId, setImdbId] = useState(undefined); // undefined=unknown, null=absent
   const [seasons, setSeasons] = useState(null); // TMDB seasons for the selected TV show
-  const [streams, setStreams] = useState(null);
-  const [lastStreamReq, setLastStreamReq] = useState(null); // params of the last /api/streams fetch, for retry
-  const [loading, setLoading] = useState(''); // '', 'search', 'resolve', 'streams'
+  // Per-source results: { comet, meteor, torrentio, forum } each
+  // { ok, error, items, loading }. null until the first fetch for a title.
+  const [sources, setSources] = useState(null);
+  const [lastStreamReq, setLastStreamReq] = useState(null); // params of the last fetch, for retry
+  const [loading, setLoading] = useState(''); // '', 'search', 'resolve'
   const [error, setError] = useState('');
   const [info, setInfo] = useState(''); // non-error notice (e.g. forum URL auto-updated)
   const [showSettings, setShowSettings] = useState(false);
@@ -56,7 +73,7 @@ export default function App() {
     return () => clearTimeout(t);
   }, [info]);
 
-  // Surface an auto-updated forum base URL from any /api/streams response.
+  // Surface an auto-updated forum base URL from a forum search response.
   function noteForumUpdate(data) {
     if (data && data.forum_base_updated) {
       setInfo(`Forum URL auto-updated to ${data.forum_base_updated}`);
@@ -68,7 +85,7 @@ export default function App() {
     setSelected(null);
     setImdbId(undefined);
     setSeasons(null);
-    setStreams(null);
+    setSources(null);
     setForumOnly(false);
     setTmdbFailed(false);
     setLastStreamReq(null);
@@ -77,7 +94,7 @@ export default function App() {
 
   function clearSelection() {
     setSelected(null);
-    setStreams(null);
+    setSources(null);
     setImdbId(undefined);
     setSeasons(null);
     setDiscoverActive(discoverActiveBeforeSelect); // "← Change title" undoes the auto-hide from selecting
@@ -104,7 +121,7 @@ export default function App() {
 
   async function onSelectTitle(title, { fromDiscover = false } = {}) {
     setSelected(title);
-    setStreams(null);
+    setSources(null);
     setImdbId(undefined);
     setSeasons(null);
     setForumOnly(false);
@@ -120,13 +137,13 @@ export default function App() {
     // search keeps using what the user typed (may deliberately differ from the
     // TMDB-resolved title — forum aliases etc., see Decision Log #11).
     // setRawQuery won't be visible in this closure until the next render, so the
-    // movie path below (which calls fetchStreams synchronously) passes `query`
-    // explicitly rather than relying on fetchStreams reading the stale state.
+    // movie path below (which fetches streams synchronously) passes `query`
+    // explicitly rather than relying on fetchAllSources reading stale state.
     const query = fromDiscover ? title.title : rawQuery.trim() || title.title;
     setRawQuery(query);
 
     // Resolve imdb_id, but tolerate failure: the forum search only needs the raw
-    // query, so we still fetch streams (torrentio is simply skipped without an id).
+    // query, so we still fetch streams (torrent sources simply skip without an id).
     // For TV, fetch the season/episode list in parallel to populate the dropdowns.
     let imdb = null;
     if (title.media_type === 'tv') {
@@ -135,7 +152,7 @@ export default function App() {
         api.tvSeasons(title.tmdb_id),
       ]);
       if (idRes.status === 'fulfilled') imdb = idRes.value.imdb_id;
-      else setError(`Couldn't resolve IMDb ID: ${idRes.reason.message}. Torrentio skipped; forum search will still run.`);
+      else setError(`Couldn't resolve IMDb ID: ${idRes.reason.message}. Torrent sources skipped; forum search will still run.`);
       // If seasons fetch fails, leave null -> the picker falls back to manual inputs.
       if (seasonsRes.status === 'fulfilled') setSeasons(seasonsRes.value.seasons);
     } else {
@@ -143,7 +160,7 @@ export default function App() {
         const res = await api.externalIds(title.media_type, title.tmdb_id);
         imdb = res.imdb_id;
       } catch (e) {
-        setError(`Couldn't resolve IMDb ID: ${e.message}. Torrentio skipped; forum search will still run.`);
+        setError(`Couldn't resolve IMDb ID: ${e.message}. Torrent sources skipped; forum search will still run.`);
       }
     }
     setImdbId(imdb);
@@ -151,7 +168,46 @@ export default function App() {
 
     // Movies fetch immediately; TV waits for the season/episode picker.
     if (title.media_type === 'movie') {
-      await fetchStreams(title, imdb, {}, query);
+      fetchAllSources(title, imdb, {}, query);
+    }
+  }
+
+  // Kick off one torrent source's fetch (Torrentio/Comet/Meteor). Independent
+  // of the other sources: sets only this source's slice of `sources`, using
+  // whichever mode (client/server) that source's own toggle currently selects.
+  async function fetchTorrentSource(key, { imdbId, mediaType, season, episode }) {
+    const { backendCall, clientModule, modeGetter } = TORRENT_SOURCES[key];
+    setSources((prev) => ({ ...prev, [key]: { ...(prev?.[key] ?? EMPTY_SOURCE), loading: true } }));
+    try {
+      const result =
+        modeGetter() === 'client'
+          ? await clientModule.fetchStreams({ imdbId, mediaType, season, episode })
+          : await backendCall({ imdbId, mediaType, season, episode });
+      setSources((prev) => ({ ...prev, [key]: { ...result, loading: false } }));
+    } catch (e) {
+      setSources((prev) => ({
+        ...prev,
+        [key]: { ok: false, error: e.message, items: [], loading: false },
+      }));
+    }
+  }
+
+  // Forum has no client-mode analog (HTML scraping, backend-only) and takes a
+  // raw query rather than an imdb_id.
+  async function fetchForumSource(query) {
+    setSources((prev) => ({ ...prev, forum: { ...(prev?.forum ?? EMPTY_SOURCE), loading: true } }));
+    try {
+      const data = await api.forumSearch({ rawQuery: query });
+      noteForumUpdate(data);
+      setSources((prev) => ({
+        ...prev,
+        forum: { ok: data.ok, error: data.error, items: data.items, loading: false },
+      }));
+    } catch (e) {
+      setSources((prev) => ({
+        ...prev,
+        forum: { ok: false, error: e.message, items: [], loading: false },
+      }));
     }
   }
 
@@ -159,80 +215,46 @@ export default function App() {
   // above, where a just-set rawQuery isn't visible yet in this render's closure.
   // Every other caller (season/episode picker, retry) runs after a re-render has
   // already picked up the current rawQuery, so they can omit it.
-  async function fetchStreams(title, imdb_id, { season, episode }, queryOverride) {
+  function fetchAllSources(title, imdb_id, { season, episode }, queryOverride) {
     const query = queryOverride ?? rawQuery;
-    // Remember the request so the Torrentio "Retry" button can re-run the same
-    // combined /api/streams fetch without needing the picker again.
-    setLastStreamReq({ title, imdb_id, season, episode });
-    setLoading('streams');
-    const clientMode = getTorrentioMode() === 'client';
-    try {
-      const serverPromise = api.streams({
-        imdbId: imdb_id ?? undefined,
-        mediaType: title.media_type,
-        rawQuery: query,
-        season,
-        episode,
-        // Client mode fetches Torrentio from the browser (residential IP)
-        // instead, so tell the backend to skip its own Torrentio call.
-        skipTorrentio: clientMode,
-      });
-
-      if (clientMode) {
-        const [serverData, torrentio] = await Promise.all([
-          serverPromise,
-          clientTorrentio.fetchStreams({
-            imdbId: imdb_id ?? undefined,
-            mediaType: title.media_type,
-            season,
-            episode,
-          }),
-        ]);
-        noteForumUpdate(serverData);
-        setStreams({ torrentio, forum: serverData.forum });
-      } else {
-        const serverData = await serverPromise;
-        noteForumUpdate(serverData);
-        setStreams(serverData);
-      }
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading('');
-    }
+    // Remembered so each source's independent Retry can re-run the same request
+    // without needing the picker again.
+    setLastStreamReq({ title, imdb_id, season, episode, query });
+    const imdbId = imdb_id ?? undefined;
+    const mediaType = title.media_type;
+    // Fire all four independently — no Promise.all gating the UI, so a fast
+    // source's tab is browsable while a slower one is still loading.
+    fetchTorrentSource('torrentio', { imdbId, mediaType, season, episode });
+    fetchTorrentSource('comet', { imdbId, mediaType, season, episode });
+    fetchTorrentSource('meteor', { imdbId, mediaType, season, episode });
+    fetchForumSource(query);
   }
 
-  function retryStreams() {
+  function retryTorrentSource(key) {
     if (!lastStreamReq) return;
     const { title, imdb_id, season, episode } = lastStreamReq;
-    fetchStreams(title, imdb_id, { season, episode });
+    fetchTorrentSource(key, { imdbId: imdb_id ?? undefined, mediaType: title.media_type, season, episode });
   }
 
-  // Forum-only search: no TMDB title / imdb_id needed. `media_type` is a required
-  // param on /api/streams, so we pass a placeholder; torrentio is skipped server-side
-  // (no imdb) and discarded here — only the forum half is shown.
+  function retryForum() {
+    if (!lastStreamReq) return;
+    fetchForumSource(lastStreamReq.query);
+  }
+
+  // Forum-only search: no TMDB title / imdb_id needed — only the Forum tab renders.
   async function searchForumOnly() {
     const q = rawQuery.trim();
     if (!q) return;
     setSelected(null);
     setForumOnly(true);
-    setStreams(null);
-    setLoading('streams');
-    try {
-      const data = await api.streams({ mediaType: 'movie', rawQuery: q });
-      noteForumUpdate(data);
-      setStreams({ torrentio: null, forum: data.forum });
-    } catch (e) {
-      // Surface as an in-panel forum error so the Retry button stays available.
-      setStreams({ torrentio: null, forum: { ok: false, error: e.message, items: [] } });
-    } finally {
-      setLoading('');
-    }
+    setSources(null);
+    setLastStreamReq({ title: null, imdb_id: null, season: undefined, episode: undefined, query: q });
+    fetchForumSource(q);
   }
 
   function backToSearch() {
     setForumOnly(false);
-    setStreams(null);
+    setSources(null);
   }
 
   const isTvSelected = selected?.media_type === 'tv';
@@ -264,7 +286,7 @@ export default function App() {
         </header>
 
         <section className="hero">
-          <span className="eyebrow">TMDB · Torrentio · Forum</span>
+          <span className="eyebrow">TMDB · Comet · Meteor · Torrentio · Forum</span>
           <h2>Find any torrent, magically.</h2>
           <p>Search a movie or show, and we’ll gather sources side by side — with one-click magnet copy.</p>
         </section>
@@ -316,24 +338,24 @@ export default function App() {
 
               {imdbId === null ? (
                 <div className="notice">
-                  No IMDb ID found for this title — torrentio is skipped, but the forum search still runs.
+                  No IMDb ID found for this title — Comet/Meteor/Torrentio are skipped, but the forum search still runs.
                 </div>
               ) : null}
 
               {isTvSelected && loading !== 'resolve' ? (
                 <SeasonEpisodePicker
                   seasons={seasons}
-                  onFetch={(se) => fetchStreams(selected, imdbId, se)}
+                  onFetch={(se) => fetchAllSources(selected, imdbId, se)}
                 />
               ) : null}
 
-              {loading === 'streams' ? <div className="spinner">Fetching torrents…</div> : null}
-
-              {streams ? (
+              {sources ? (
                 <ResultTabs
-                  streams={streams}
-                  onRetry={retryStreams}
-                  retrying={loading === 'streams'}
+                  sources={sources}
+                  onRetryTorrentio={() => retryTorrentSource('torrentio')}
+                  onRetryComet={() => retryTorrentSource('comet')}
+                  onRetryMeteor={() => retryTorrentSource('meteor')}
+                  onRetryForum={retryForum}
                 />
               ) : null}
             </motion.div>
@@ -347,7 +369,7 @@ export default function App() {
             {tmdbFailed ? 'Title lookup failed.' : 'No matching titles found.'}{' '}
             You can still search the forum directly.
             <div style={{ marginTop: 14 }}>
-              <button onClick={searchForumOnly} disabled={loading === 'streams'}>
+              <button onClick={searchForumOnly} disabled={sources?.forum?.loading}>
                 Search forum for “{rawQuery}”
               </button>
             </div>
@@ -362,14 +384,8 @@ export default function App() {
                 ← New search
               </button>
             </div>
-            {loading === 'streams' ? <div className="spinner">Searching forum…</div> : null}
-            {streams ? (
-              <ResultTabs
-                streams={streams}
-                forumOnly
-                onRetry={searchForumOnly}
-                retrying={loading === 'streams'}
-              />
+            {sources ? (
+              <ResultTabs sources={sources} forumOnly onRetryForum={retryForum} />
             ) : null}
           </div>
         ) : null}

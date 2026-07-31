@@ -1,12 +1,12 @@
-// Where Torrentio is fetched from: 'client' (browser, user's residential IP) or
-// 'server' (backend). Persisted per-browser in localStorage. Default is 'client'
-// so a VPS deployment blocked by Cloudflare (datacenter-IP 403) works out of the
-// box for most visitors; flip DEFAULT_MODE to 'server' to reverse that.
-const KEY = 'torrentioMode';
+// Where Meteor is fetched from: 'client' (browser) or 'server' (backend).
+// Persisted per-browser in localStorage. Mirrors torrentioMode.js — Meteor
+// sends `access-control-allow-origin: *`, so client mode works the same way
+// it does for Torrentio.
+const KEY = 'meteorMode';
 const DEFAULT_MODE = 'client';
 
-// localStorage.getItem is synchronous I/O; getTorrentioMode() is called on every
-// fetch, so cache the parsed value in memory. setTorrentioMode keeps the cache in
+// localStorage.getItem is synchronous I/O; getMeteorMode() is called on every
+// fetch, so cache the parsed value in memory. setMeteorMode keeps the cache in
 // sync on our own writes; the `storage` listener invalidates it if another tab
 // changes the value (same-tab writes never fire `storage`, only other tabs' do).
 let cached;
@@ -14,7 +14,7 @@ window.addEventListener('storage', (e) => {
   if (e.key === KEY) cached = undefined;
 });
 
-export function getTorrentioMode() {
+export function getMeteorMode() {
   if (cached !== undefined) return cached;
   try {
     const v = localStorage.getItem(KEY);
@@ -25,7 +25,7 @@ export function getTorrentioMode() {
   return cached;
 }
 
-export function setTorrentioMode(mode) {
+export function setMeteorMode(mode) {
   cached = mode === 'server' ? 'server' : 'client';
   try {
     localStorage.setItem(KEY, cached);

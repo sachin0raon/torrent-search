@@ -1,14 +1,17 @@
-"""Torrentio service: build stream URL, fetch, parse titles, build magnets.
+"""Comet service: build stream URL, fetch, parse titles, build magnets.
 
-Torrentio addressing:
+Comet addressing mirrors Torrentio:
     movie                    -> /movie/{imdb_id}.json
     tv, whole series         -> /series/{imdb_id}.json
     tv, specific episode     -> /series/{imdb_id}:{season}:{episode}.json
 
-The stream `title` is newline-separated, e.g.:
-    "Ubuntu 22.04 desktop amd64\n👤 3945 💾 1.34 GB ⚙️ Bittorrent"
-Line 1 is the display title; the metadata line carries seeders (👤), size (💾),
-and provider (⚙️), each optional.
+Unlike Torrentio, Comet packs its title/metadata into the `description` field
+(not `title`), first line prefixed "📄 ", e.g.:
+    "📄 Movie.2026.2160p.mkv\n👤 42 💾 62.9 GB 🔎 Knaben"
+Metadata (all optional): seeders (👤), size (💾), provider (🔎).
+
+Many entries (debrid-cached, no active swarm) carry no seeders/sources at all;
+those are pushed to the end when sorting by seeders (see streams_to_items).
 """
 from __future__ import annotations
 
@@ -16,14 +19,14 @@ import re
 
 import httpx
 
-from app.config import OUTBOUND_TIMEOUT_SECONDS, REQUEST_HEADERS, TORRENTIO_BASE
+from app.config import COMET_BASE, OUTBOUND_TIMEOUT_SECONDS, REQUEST_HEADERS
 from app.models import TorrentioItem
 from app.services.http import get_with_retry
 from app.utils.magnet import build_magnet
 
 _SEEDERS_RE = re.compile(r"👤\s*([\d,]+)")
-_SIZE_RE = re.compile(r"💾\s*([^⚙️👤]+)")
-_PROVIDER_RE = re.compile(r"⚙️\s*([^\n]+)")
+_SIZE_RE = re.compile(r"💾\s*([^🔎👤]+)")
+_PROVIDER_RE = re.compile(r"🔎\s*([^\n]+)")
 
 
 def build_stream_url(
@@ -33,20 +36,21 @@ def build_stream_url(
     episode: int | None = None,
 ) -> str:
     if media_type == "movie":
-        return f"{TORRENTIO_BASE}/movie/{imdb_id}.json"
-    # tv / series
+        return f"{COMET_BASE}/movie/{imdb_id}.json"
     if season is not None and episode is not None:
-        return f"{TORRENTIO_BASE}/series/{imdb_id}:{season}:{episode}.json"
-    return f"{TORRENTIO_BASE}/series/{imdb_id}.json"
+        return f"{COMET_BASE}/series/{imdb_id}:{season}:{episode}.json"
+    return f"{COMET_BASE}/series/{imdb_id}.json"
 
 
-def parse_stream_title(raw_title: str) -> dict:
-    """Extract display title + optional seeders/size/provider from a raw title."""
-    lines = (raw_title or "").split("\n")
+def parse_stream_title(raw_description: str) -> dict:
+    """Extract display title + optional seeders/size/provider from a raw description."""
+    lines = (raw_description or "").split("\n")
     display_title = lines[0].strip() if lines else ""
+    if display_title.startswith("📄"):
+        display_title = display_title.lstrip("📄").strip()
 
     seeders = None
-    m = _SEEDERS_RE.search(raw_title or "")
+    m = _SEEDERS_RE.search(raw_description or "")
     if m:
         try:
             seeders = int(m.group(1).replace(",", ""))
@@ -54,12 +58,12 @@ def parse_stream_title(raw_title: str) -> dict:
             seeders = None
 
     size = None
-    m = _SIZE_RE.search(raw_title or "")
+    m = _SIZE_RE.search(raw_description or "")
     if m:
         size = m.group(1).strip() or None
 
     source = None
-    m = _PROVIDER_RE.search(raw_title or "")
+    m = _PROVIDER_RE.search(raw_description or "")
     if m:
         source = m.group(1).strip() or None
 
@@ -78,12 +82,10 @@ def streams_to_items(streams: list[dict]) -> list[TorrentioItem]:
         info_hash = s.get("infoHash")
         if not info_hash:
             continue
-        parsed = parse_stream_title(s.get("title", ""))
+        parsed = parse_stream_title(s.get("description", ""))
         magnet = build_magnet(parsed["title"], info_hash, s.get("sources"))
-        # Torrentio sometimes lists the same torrent (identical infoHash, title,
-        # and sources -> identical magnet) via more than one provider; keep the
-        # first and drop the rest, since a duplicate magnet is functionally a
-        # duplicate row (and would otherwise collide as a React key).
+        # Comet sometimes lists the same torrent via more than one provider ->
+        # identical magnet; keep the first and drop the rest (see torrentio.py).
         if magnet in seen_magnets:
             continue
         seen_magnets.add(magnet)
@@ -96,6 +98,9 @@ def streams_to_items(streams: list[dict]) -> list[TorrentioItem]:
                 magnet=magnet,
             )
         )
+    # Comet's config has no upstream sort request (unlike Torrentio/Meteor), so
+    # sort locally: known-seeder items descending, unknown (None) last, stable.
+    items.sort(key=lambda i: (i.seeders is None, -(i.seeders or 0)))
     return items
 
 
@@ -110,8 +115,8 @@ async def fetch_streams(
     owns_client = client is None
     # Mirror the shared app-lifetime client's headers/redirect behavior (see
     # main.py's lifespan) so a standalone call (script, REPL, future caller)
-    # doesn't silently lose the browser User-Agent that keeps anti-bot
-    # providers like Comet from blocking it.
+    # doesn't silently lose the browser User-Agent that keeps Comet's
+    # anti-bot check (a flat 405 without it) from blocking it.
     client = client or httpx.AsyncClient(
         timeout=OUTBOUND_TIMEOUT_SECONDS, follow_redirects=True, headers=REQUEST_HEADERS
     )
