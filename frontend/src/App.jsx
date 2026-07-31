@@ -20,8 +20,6 @@ import Toast from './components/Toast.jsx';
 import ScrollToTopButton from './components/ScrollToTopButton.jsx';
 import { fadeUp, spring } from './motion.js';
 
-const EMPTY_SOURCE = { ok: false, error: null, items: [], loading: false };
-
 // Each torrent source is fetched independently (own backend endpoint, own
 // client-side module, own client/server mode toggle), so one slow/failed
 // source never blocks or affects the others' results or retry.
@@ -177,7 +175,10 @@ export default function App() {
   // whichever mode (client/server) that source's own toggle currently selects.
   async function fetchTorrentSource(key, { imdbId, mediaType, season, episode }) {
     const { backendCall, clientModule, modeGetter } = TORRENT_SOURCES[key];
-    setSources((prev) => ({ ...prev, [key]: { ...(prev?.[key] ?? EMPTY_SOURCE), loading: true } }));
+    // Hard reset (not a merge with the prior result): starting a fetch — first
+    // attempt or Retry — always clears any previous error so the tab shows the
+    // loading spinner, not a stale error banner, while it's in flight.
+    setSources((prev) => ({ ...prev, [key]: { ok: false, error: null, items: [], loading: true } }));
     try {
       const result =
         modeGetter() === 'client'
@@ -195,7 +196,7 @@ export default function App() {
   // Forum has no client-mode analog (HTML scraping, backend-only) and takes a
   // raw query rather than an imdb_id.
   async function fetchForumSource(query) {
-    setSources((prev) => ({ ...prev, forum: { ...(prev?.forum ?? EMPTY_SOURCE), loading: true } }));
+    setSources((prev) => ({ ...prev, forum: { ok: false, error: null, items: [], loading: true } }));
     try {
       const data = await api.forumSearch({ rawQuery: query });
       noteForumUpdate(data);

@@ -123,6 +123,53 @@ describe('ResultTabs', () => {
     expect(onRetryForum).not.toHaveBeenCalled();
   });
 
+  it('an error banner has a working dismiss button that hides just the message', async () => {
+    const sources = {
+      ...baseSources,
+      torrentio: { ok: false, error: 'timed out', items: [], loading: false },
+    };
+    render(<ResultTabs sources={sources} onRetryTorrentio={vi.fn()} />);
+    await userEvent.click(screen.getByRole('tab', { name: /torrentio/i }));
+
+    const banner = screen.getByRole('alert');
+    expect(banner).toHaveTextContent('Torrentio: timed out');
+    await userEvent.click(screen.getByRole('button', { name: /dismiss/i }));
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // Retry stays available even after the banner is dismissed.
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it('a fresh error (e.g. after a failed retry) re-appears even if the prior one was dismissed', async () => {
+    const sources = {
+      ...baseSources,
+      torrentio: { ok: false, error: 'timed out', items: [], loading: false },
+    };
+    const { rerender } = render(<ResultTabs sources={sources} onRetryTorrentio={vi.fn()} />);
+    await userEvent.click(screen.getByRole('tab', { name: /torrentio/i }));
+    await userEvent.click(screen.getByRole('button', { name: /dismiss/i }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    // Retry starts: the loading spinner replaces the error entirely.
+    rerender(
+      <ResultTabs
+        sources={{ ...sources, torrentio: { ok: false, error: null, items: [], loading: true } }}
+        onRetryTorrentio={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/fetching torrentio/i)).toBeInTheDocument();
+
+    // Retry fails again with the same message — it should be visible again,
+    // not still hidden from the earlier dismissal.
+    rerender(
+      <ResultTabs
+        sources={{ ...sources, torrentio: { ok: false, error: 'timed out', items: [], loading: false } }}
+        onRetryTorrentio={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent('Torrentio: timed out');
+  });
+
   it('forumOnly renders just the Forum tab and wires its retry', async () => {
     const onRetryForum = vi.fn();
     const sources = { forum: { ok: false, error: 'timed out', items: [], loading: false } };

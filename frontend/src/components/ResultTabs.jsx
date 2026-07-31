@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { RefreshCw, Zap } from 'lucide-react';
 import CopyButton from './CopyButton.jsx';
@@ -16,25 +16,36 @@ const TAB_ORDER = [
   { key: 'torrentio', label: 'Torrentio' },
 ];
 
-// Shared plain-glass retry control for per-source failures.
-function RetryButton({ onRetry, retrying }) {
+// Shared plain-glass retry control for per-source failures. Starting a fetch
+// (App.jsx's fetchTorrentSource/fetchForumSource) always clears the prior
+// error before setting loading, so by the time this renders the fetch is
+// never in flight — no separate "Retrying…" state needed.
+function RetryButton({ onRetry }) {
   if (!onRetry) return null;
   return (
-    <button onClick={onRetry} disabled={retrying} style={{ marginTop: 2 }}>
-      {!retrying && <RefreshCw size={13} />}
-      {retrying ? 'Retrying…' : 'Retry'}
+    <button onClick={onRetry} style={{ marginTop: 2 }}>
+      <RefreshCw size={13} />
+      Retry
     </button>
   );
 }
 
+// Resets to false whenever a genuinely new error shows up (a fresh failure,
+// possibly with the same message as a previously-dismissed one, always passes
+// through `null` while the retry is in flight — see App.jsx — so this effect
+// re-fires and un-dismisses it).
+function useDismissedError(errorMessage) {
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => {
+    setDismissed(false);
+  }, [errorMessage]);
+  return [dismissed, () => setDismissed(true)];
+}
+
 // Loading/error/empty branches shared by every source's tab. Returns null
 // when the caller should render the actual items (ok, with results).
-function renderSourceState(result, sourceLabel, onRetry) {
-  // Only the very first fetch for a source has loading=true with no error yet
-  // (a retry-in-flight keeps the prior error around — see App.jsx's
-  // fetchTorrentSource/fetchForumSource — so it falls through to the error
-  // branch below instead, showing "Retrying…" on the existing banner).
-  if (result.loading && result.error == null) {
+function renderSourceState(result, sourceLabel, onRetry, dismissed, onDismiss) {
+  if (result.loading) {
     return <div className="spinner">Fetching {sourceLabel}…</div>;
   }
   // Guard on an actual error message (not just !ok) so an untouched/idle
@@ -43,8 +54,10 @@ function renderSourceState(result, sourceLabel, onRetry) {
   if (!result.ok && result.error) {
     return (
       <div>
-        <ErrorBanner message={`${sourceLabel}: ${result.error}`} />
-        <RetryButton onRetry={onRetry} retrying={result.loading} />
+        {!dismissed && (
+          <ErrorBanner message={`${sourceLabel}: ${result.error}`} onDismiss={onDismiss} />
+        )}
+        <RetryButton onRetry={onRetry} />
       </div>
     );
   }
@@ -87,7 +100,8 @@ function TorrentRow({ item }) {
 }
 
 function TorrentTab({ result, sourceLabel, onRetry }) {
-  const state = renderSourceState(result, sourceLabel, onRetry);
+  const [dismissed, dismiss] = useDismissedError(result.error);
+  const state = renderSourceState(result, sourceLabel, onRetry, dismissed, dismiss);
   if (state) return state;
   return (
     <motion.div variants={staggerContainer} initial="initial" animate="animate">
@@ -99,7 +113,8 @@ function TorrentTab({ result, sourceLabel, onRetry }) {
 }
 
 function ForumTab({ result, onRetry }) {
-  const state = renderSourceState(result, 'Forum', onRetry);
+  const [dismissed, dismiss] = useDismissedError(result.error);
+  const state = renderSourceState(result, 'Forum', onRetry, dismissed, dismiss);
   if (state) return state;
   return (
     <motion.div variants={staggerContainer} initial="initial" animate="animate">

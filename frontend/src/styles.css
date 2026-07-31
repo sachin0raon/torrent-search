@@ -436,8 +436,11 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 /* Backend/upstream error text can contain long unbroken tokens (a URL, for
    instance — TMDB error bodies embed one). A flex item's default min-width:auto
    stops it wrapping at that point and overflows the banner instead, so
-   override both explicitly; Dismiss is fixed-size so only the message shrinks. */
-.error-banner span { min-width: 0; overflow-wrap: break-word; }
+   override both explicitly; Dismiss is fixed-size so only the message shrinks.
+   flex: 1 makes the message fill the row (hugging the icon on the left) so
+   `justify-content: space-between` has no leftover space to push it right —
+   matters especially when there's no Dismiss button as the third flex item. */
+.error-banner span { min-width: 0; flex: 1; overflow-wrap: break-word; }
 .error-banner button.link { flex: none; }
 
 .empty { color: var(--muted); padding: 28px; text-align: center; border: 1px dashed var(--hairline); border-radius: var(--radius-md); }
