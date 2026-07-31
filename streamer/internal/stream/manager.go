@@ -79,6 +79,7 @@ type Manager struct {
 	cfg      Config
 	client   TorrentClient
 	trackers TrackerProvider  // optional; nil means no extra trackers
+	qbit     *QBitPeerSource  // optional; nil means disabled
 	now      func() time.Time // injectable clock for tests
 
 	mu         sync.Mutex
@@ -108,6 +109,11 @@ func (m *Manager) SetClock(now func() time.Time) { m.now = now }
 // SetTrackerProvider attaches a source of extra trackers, applied to each new
 // torrent to widen peer discovery.
 func (m *Manager) SetTrackerProvider(p TrackerProvider) { m.trackers = p }
+
+// SetQBitPeerSource attaches a qBittorrent-backed peer discovery source. When
+// set, each new session triggers a background goroutine that adds the magnet to
+// qBittorrent and injects discovered peers directly into the anacrolix torrent.
+func (m *Manager) SetQBitPeerSource(q *QBitPeerSource) { m.qbit = q }
 
 // WipeDownloadDir clears the ephemeral data root, giving a clean slate after a
 // restart. It removes the directory's *contents* rather than the directory
@@ -173,6 +179,9 @@ func (m *Manager) AddSession(ctx context.Context, magnet string) (*Session, erro
 	// help fetch the info dict too.
 	m.addTrackers(s)
 	go m.proactiveAnnounce(s)
+	if m.qbit != nil {
+		go m.qbit.InjectPeers(magnet, ih, s.t.GotInfo(), m.makePeerAdder(s))
+	}
 
 	if err := m.awaitInfo(ctx, s); err != nil {
 		// Keep the session alive so a retry immediately reuses this torrent,
@@ -184,6 +193,18 @@ func (m *Manager) AddSession(ctx context.Context, magnet string) (*Session, erro
 	return s, nil
 }
 
+// makePeerAdder returns a function that injects peer addresses into the session's
+// underlying torrent. The type assertion is done once here so the hot path
+// (called on every poll tick) avoids repeated reflection.
+func (m *Manager) makePeerAdder(s *Session) func([]net.UDPAddr) {
+	type peerAdder interface{ AddPeers([]net.UDPAddr) }
+	ap, ok := s.t.(peerAdder)
+	if !ok {
+		return func([]net.UDPAddr) {}
+	}
+	return ap.AddPeers
+}
+
 // proactiveAnnounce fires HTTP announces to public trackers immediately after a
 // session is created, then injects the returned peer addresses directly into
 // the torrent. This gives anacrolix a warm peer list without waiting for the
@@ -192,22 +213,22 @@ func (m *Manager) proactiveAnnounce(s *Session) {
 	if m.trackers == nil {
 		return
 	}
+	tiers := m.trackers.Tiers()
+	if len(tiers) == 0 {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	var urls []string
-	for _, tier := range m.trackers.Tiers() {
+	urls := make([]string, 0, len(tiers))
+	for _, tier := range tiers {
 		urls = append(urls, tier...)
 	}
 
 	peers := announcePeers(ctx, s.Infohash, uint16(m.cfg.TorrentPort), urls)
-	if len(peers) == 0 {
-		return
-	}
-
-	type peerAdder interface{ AddPeers([]net.UDPAddr) }
-	if ap, ok := s.t.(peerAdder); ok {
-		ap.AddPeers(peers)
+	if len(peers) > 0 {
+		m.makePeerAdder(s)(peers)
 	}
 }
 

@@ -25,6 +25,16 @@ func main() {
 	}
 
 	mgr := stream.NewManager(cfg, client)
+
+	if cfg.QBitHost != "" {
+		qbit, err := stream.NewQBitPeerSource(cfg.QBitHost, cfg.QBitUser, cfg.QBitPass)
+		if err != nil {
+			log.Printf("streamer: qbit peer source unavailable: %v (peer injection disabled)", err)
+		} else {
+			mgr.SetQBitPeerSource(qbit)
+		}
+	}
+
 	if err := mgr.WipeDownloadDir(); err != nil {
 		log.Fatalf("streamer: failed to prepare download dir: %v", err)
 	}

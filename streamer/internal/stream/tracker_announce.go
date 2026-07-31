@@ -87,10 +87,17 @@ func httpTrackers(urls []string, limit int) []string {
 		if len(out) >= limit {
 			break
 		}
-		lo := strings.ToLower(u)
-		if strings.HasPrefix(lo, "http://") || strings.HasPrefix(lo, "https://") {
+		if isHTTPTracker(u) {
 			out = append(out, u)
 		}
 	}
 	return out
+}
+
+func isHTTPTracker(u string) bool {
+	// Fast path: check scheme prefix without allocating a lowercase copy.
+	if len(u) < 7 {
+		return false
+	}
+	return strings.EqualFold(u[:7], "http://") || (len(u) >= 8 && strings.EqualFold(u[:8], "https://"))
 }

@@ -39,6 +39,13 @@ type Config struct {
 	// restarts. Empty string disables persistence. Defaults to the persistent
 	// data volume so the routing table survives container restarts.
 	DHTStateFile string
+	// QBitHost is the base URL of a running qBittorrent Web UI
+	// (e.g. "http://localhost:8080"). Empty string disables qBittorrent peer
+	// injection entirely.
+	QBitHost string
+	// QBitUser and QBitPass are the Web UI credentials (default: admin / adminadmin).
+	QBitUser string
+	QBitPass string
 }
 
 // LoadConfig reads configuration from the environment, applying defaults for
@@ -56,6 +63,9 @@ func LoadConfig() Config {
 		TrackersTimeout: envSeconds("STREAM_TRACKERS_TIMEOUT", 15),
 		TorrentPort:  envInt("STREAM_TORRENT_PORT", 6881),
 		DHTStateFile: envStr("STREAM_DHT_STATE_FILE", "/data/dht-state.json"),
+		QBitHost:     envStr("STREAM_QBIT_HOST", ""),
+		QBitUser:     envStr("STREAM_QBIT_USER", "admin"),
+		QBitPass:     envStr("STREAM_QBIT_PASS", "adminadmin"),
 	}
 }
 
