@@ -36,6 +36,10 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /stream-api/sessions/{id}/stats", h.getSessionStats)
 	mux.HandleFunc("DELETE /stream-api/sessions/{id}", h.deleteSession)
 	mux.HandleFunc("GET /stream/{id}/{index}/{filename...}", h.streamFile)
+	// Some players (e.g. MX Player) strip the filename from the URL and request
+	// just /{id}/{index}. Serve directly from this pattern to avoid the 301
+	// redirect that Go's mux would otherwise issue to /{id}/{index}/.
+	mux.HandleFunc("GET /stream/{id}/{index}", h.streamFile)
 	mux.HandleFunc("GET /healthz", h.health)
 	return mux
 }
@@ -132,6 +136,10 @@ func (h *Handler) streamFile(w http.ResponseWriter, r *http.Request) {
 	// Set the content type explicitly so http.ServeContent does not sniff by
 	// reading the first bytes (which could block on not-yet-downloaded pieces).
 	w.Header().Set("Content-Type", contentType(name))
+	// Provide the filename to players that determine format from Content-Disposition
+	// rather than the URL path (e.g. when the player stripped the filename from
+	// the URL before requesting).
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": name}))
 	// ServeContent handles Range/If-Range parsing, 206 responses and
 	// Accept-Ranges using the reader's Seek to discover the size.
 	http.ServeContent(w, r, name, time.Time{}, reader)
