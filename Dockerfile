@@ -22,7 +22,7 @@ COPY backend/app ./app
 RUN uv pip install --python "$VIRTUAL_ENV/bin/python" .
 
 # ---- Stage 3: build the Go torrent-streaming service ----
-FROM golang:1.24-bookworm AS gostream
+FROM golang:1.25-bookworm AS gostream
 WORKDIR /src
 # Dependencies first for layer caching.
 COPY streamer/go.mod streamer/go.sum ./
