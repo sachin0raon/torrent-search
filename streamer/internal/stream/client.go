@@ -51,8 +51,11 @@ type Torrent interface {
 	// AddTrackers merges extra trackers (a BEP-12 tiered announce list) into the
 	// torrent to widen peer discovery.
 	AddTrackers(announceList [][]string)
-	// Drop removes the torrent from its client, stopping all activity.
-	Drop()
+	// Drop removes the torrent from its client, stopping all activity. An error
+	// means the underlying engine failed to remove/clean up the torrent (e.g. the
+	// qBittorrent engine's DeleteTorrentsCtx call failing because qBittorrent is
+	// unreachable) — the caller should retry rather than assume cleanup happened.
+	Drop() error
 }
 
 // TorrentClient adds magnets and can be closed on shutdown.
@@ -82,7 +85,7 @@ func NewAnacrolixClient(dataDir string, listenPort int, dhtStateFile string) (To
 	// On a server with an open listen port, more simultaneous outbound attempts
 	// means faster time-to-first-connection when most peers are behind NAT.
 	cfg.HalfOpenConnsPerTorrent = 100
-	cfg.TotalHalfOpenConns = 500     // global cap shared across all torrents; default is 100
+	cfg.TotalHalfOpenConns = 500         // global cap shared across all torrents; default is 100
 	cfg.EstablishedConnsPerTorrent = 200 // default is 50; more connections = faster metadata
 	// uTP (UDP-based transport) bypasses VPS-level TCP throttling of BitTorrent
 	// traffic. UDP is confirmed unblocked. Risk: drops TCP-only peers, but
@@ -192,7 +195,7 @@ func (a *anacrolixTorrent) GotInfo() <-chan struct{}  { return a.t.GotInfo() }
 func (a *anacrolixTorrent) InfoHash() string          { return a.t.InfoHash().HexString() }
 func (a *anacrolixTorrent) Name() string              { return a.t.Name() }
 func (a *anacrolixTorrent) AddTrackers(al [][]string) { a.t.AddTrackers(al) }
-func (a *anacrolixTorrent) Drop()                     { a.t.Drop() }
+func (a *anacrolixTorrent) Drop() error               { a.t.Drop(); return nil }
 func (a *anacrolixTorrent) Stats() TorrentStat {
 	s := a.t.Stats()
 	return TorrentStat{

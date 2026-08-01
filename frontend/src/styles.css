@@ -76,6 +76,8 @@ header.app-header {
   right: 16px;
   z-index: 40;
   pointer-events: none;
+  display: flex;
+  gap: 10px;
 }
 .icon-btn {
   pointer-events: auto;
@@ -472,8 +474,66 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .stream-file-head { display: flex; align-items: center; gap: 10px; }
 .stream-file-head .fname { word-break: break-word; font-size: 13px; min-width: 0; flex: 1; }
 .stream-file-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex: none; }
+.download-file-row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.download-file-row .fname { word-break: break-word; font-size: 13px; min-width: 0; flex: 1; }
+.download-file-row .notice { flex: none; }
+.download-select-all { border: none; padding: 2px 12px 8px; font-weight: 600; }
+.download-select-all .fname { flex: none; font-size: 12px; color: var(--muted); }
+
+/* Floating download-start button: fixed to the viewport's bottom-right
+   corner, stacked directly above .scroll-top-btn (same right offset, bottom
+   pushed up by that button's own height + a gap) rather than beside it.
+   Portaled to <body> in DownloadPanel.jsx — not confined to the local
+   .stream-panel box — it needs to read as a real page-level floating
+   action button, the same family as .scroll-top-btn/.stats-fab, not a
+   control pinned to wherever its result row happens to scroll to. Sitting
+   outside .stream-files' own scrollable area also means it never sits in
+   front of scrolled content and never needs a backdrop to mask it. Only
+   rendered once a file is selected (DownloadPanel.jsx). */
+.download-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 82px;
+  z-index: 46;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(12, 12, 14, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--hairline);
+  color: var(--text);
+  box-shadow: var(--inset-hi), 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.download-fab:hover { color: #fff; background: rgba(20, 20, 24, 0.85); }
+.download-fab-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  pointer-events: none;
+  line-height: 1;
+}
 .player-links { padding-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
 .player-btn { white-space: nowrap; }
+/* Downloads modal file row: Copy link / Download file shrink to icon-only
+   so the row (3 player deep links + these two) fits on one line. */
+.player-btn.icon-only { padding: 9px; }
+.player-btn.icon-only .btn-label { display: none; }
 
 /* ---- Modal ---- */
 .modal-backdrop {
@@ -511,7 +571,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .toggle-row input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; flex: none; }
 /* The note explaining a toggle sits right under it; span is inline by default
    so a plain margin-top wouldn't apply — block it so the extra space shows. */
-.toggle-row + .source-note { display: block; margin-top: 10px; }
+.toggle-row + .source-note { display: block; margin-top: 4px; }
 .copied { color: var(--ok); font-size: 12px; }
 
 /* ---- Scroll-to-top (floating, bottom-right) ---- */
@@ -609,13 +669,30 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   .toast-wrap { top: 14px; right: 14px; left: 14px; }
   .season-episode input { width: 100%; }
   .result-row .row-main { flex-wrap: wrap; }
-  .result-row .actions { margin-left: 0; }
+  /* Stream + Download + Copy magnet no longer fit on one line on narrow
+     screens now that Download is a third action — wrap rather than overflow. */
+  .result-row .actions { margin-left: 0; flex-wrap: wrap; }
 
   /* Forum link rows: filename on its own line, action buttons wrap below so
-     "Torrent file" + "Copy magnet" don't get crushed on narrow screens. */
+     up to four actions (Torrent file, Stream, Download, Copy magnet) don't
+     get crushed or overflow on narrow screens. */
   .forum-link-row { flex-wrap: wrap; }
   .forum-link-row .fname { flex-basis: 100%; }
-  .forum-link-row .actions { margin-left: 0; }
+  .forum-link-row .actions { margin-left: 0; flex-wrap: wrap; }
+
+  /* "Copy magnet" was still wide enough post-wrap to push past its
+     container's edge — drop the label and keep just the icon here. */
+  .result-row .actions .btn-label,
+  .forum-link-row .actions .btn-label { display: none; }
+
+  /* Once .btn-label is hidden the button contains only an icon — equal padding
+     makes it square so border-radius: 999px gives a true circle. */
+  .result-row .actions button:has(> .btn-label),
+  .forum-link-row .actions button:has(> .btn-label) { padding: 7px; }
+
+  /* Downloads modal cards: Show files / Delete can overflow once "Delete"
+     becomes the longer "Confirm delete?" label after the first tap. */
+  .stats-card-actions { flex-wrap: wrap; }
 
   /* Stream modal: tighter padding on small screens. */
   .modal { padding: 18px; }
@@ -623,6 +700,20 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   .player-btn { font-size: 13px; padding: 8px 14px; }
 
   .scroll-top-btn { bottom: 16px; right: 16px; }
+  .download-fab { bottom: 72px; right: 16px; }
+
+  /* Source tabs: 4 tabs no longer fit on one line on narrow screens —
+     wrap into a 2-column grid instead of forcing horizontal scroll. */
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+    border-radius: var(--radius-md);
+  }
+  .tab {
+    flex: 1 1 calc(50% - 4px);
+    text-align: center;
+  }
 }
 
 /* ---- Stats FAB (floating activity button, top-left) ---- */
@@ -738,6 +829,13 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   font-size: 12px;
   color: var(--muted);
 }
+
+/* ---- Download card actions (Show files / Delete) ----
+   Deliberately its own class, not the generic "actions" used by result rows
+   and modal footers: a bare .actions here would unintentionally inherit
+   ".modal .actions"'s flex-end/margin-top rules, since these cards live
+   inside .modal. */
+.stats-card-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 
 /* ---- Touch targets: enforce >=44px hit areas on touch devices (pointer:coarse
    catches phones/tablets without penalizing desktop mouse users). ---- */

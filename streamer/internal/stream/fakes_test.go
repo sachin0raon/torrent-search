@@ -35,6 +35,7 @@ type fakeTorrent struct {
 
 	mu       sync.Mutex
 	dropped  bool
+	dropErr  error // if set, the next Drop() call returns this error once, then succeeds
 	trackers [][]string
 }
 
@@ -52,10 +53,16 @@ func (t *fakeTorrent) addedTrackers() [][]string {
 	defer t.mu.Unlock()
 	return t.trackers
 }
-func (t *fakeTorrent) Drop() {
+func (t *fakeTorrent) Drop() error {
 	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.dropErr != nil {
+		err := t.dropErr
+		t.dropErr = nil // next Drop() call succeeds, simulating a transient failure
+		return err
+	}
 	t.dropped = true
-	t.mu.Unlock()
+	return nil
 }
 func (t *fakeTorrent) Stats() TorrentStat { return TorrentStat{} }
 func (t *fakeTorrent) wasDropped() bool {

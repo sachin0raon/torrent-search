@@ -82,9 +82,10 @@ type Manager struct {
 	qbit     *QBitPeerSource  // optional; nil means disabled
 	now      func() time.Time // injectable clock for tests
 
-	mu         sync.Mutex
-	sessions   map[string]*Session
-	byInfohash map[string]string // infohash -> sessionID
+	mu             sync.Mutex
+	sessions       map[string]*Session
+	byInfohash     map[string]string // infohash -> sessionID
+	pendingRemoval []*Session        // sessions whose Drop() failed; retried each GC tick
 
 	stopGC chan struct{}
 	wg     sync.WaitGroup
@@ -164,7 +165,12 @@ func (m *Manager) AddSession(ctx context.Context, magnet string) (*Session, erro
 
 	if len(m.sessions) >= m.cfg.MaxActive {
 		log.Printf("streamer: at capacity (%d/%d), rejected magnet", len(m.sessions), m.cfg.MaxActive)
-		t.Drop()
+		if err := t.Drop(); err != nil {
+			// This torrent was never tracked in a Session, so there's nothing to
+			// retry against; best-effort only (matches the untracked nature of a
+			// rejected add).
+			log.Printf("streamer: drop of rejected magnet failed: %v", err)
+		}
 		m.mu.Unlock()
 		return nil, ErrAtCapacity
 	}
@@ -175,12 +181,31 @@ func (m *Manager) AddSession(ctx context.Context, magnet string) (*Session, erro
 	m.byInfohash[ih] = s.ID
 	m.mu.Unlock()
 
+	// Engines that can detect their underlying torrent was deleted out-of-band
+	// (e.g. the qBittorrent engine, directly via qBittorrent's own UI, not
+	// through this app) implement this optional interface so Manager's own
+	// bookkeeping gets cleaned up immediately — otherwise a subsequent request
+	// for this session would repeat the same detect-then-fail cycle instead of
+	// getting the existing clean 410 Gone / "Restart stream" flow.
+	if gn, ok := s.t.(goneNotifiable); ok {
+		gn.SetGoneCallback(func() { m.remove(s) })
+	}
+
 	// Widen peer discovery before waiting for metadata, so the extra trackers
 	// help fetch the info dict too.
 	m.addTrackers(s)
 	go m.proactiveAnnounce(s)
 	if m.qbit != nil {
-		go m.qbit.InjectPeers(magnet, ih, s.t.GotInfo(), m.makePeerAdder(s))
+		// Tracked via m.wg so Close() waits for it — otherwise an in-flight
+		// InjectPeers call (up to qbtMaxDuration) could outlive process shutdown,
+		// which matters once a qBittorrent-engine deployment exists: an overlapping
+		// old/new container during a redeploy is exactly the scenario the category
+		// guard in QBitPeerSource.InjectPeers protects against.
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			m.qbit.InjectPeers(magnet, ih, s.t.GotInfo(), m.makePeerAdder(s))
+		}()
 	}
 
 	if err := m.awaitInfo(ctx, s); err != nil {
@@ -343,11 +368,28 @@ func (m *Manager) OpenFile(id string, index int) (Reader, FileInfo, error) {
 	m.mu.Unlock()
 
 	s.touch(m.now())
+	// Engines that support downloading only the picked file (e.g. the qBittorrent
+	// engine, for season-pack bandwidth efficiency) implement this optional
+	// interface; anacrolix doesn't, so this is a no-op on that path — same
+	// type-assertion pattern as makePeerAdder above.
+	if fp, ok := s.t.(filePrioritizer); ok {
+		fp.PrioritizeFile(index)
+	}
 	r := f.NewReader()
 	r.SetReadahead(readahead)
 	now := m.now
 	return &touchReader{Reader: r, onRead: func() { s.touch(now()) }}, info, nil
 }
+
+// filePrioritizer is implemented by engines that can steer download priority
+// toward a single file within a multi-file torrent (season packs).
+type filePrioritizer interface{ PrioritizeFile(index int) }
+
+// goneNotifiable is implemented by engines that can detect their underlying
+// torrent was deleted out-of-band and want Manager to clean up bookkeeping
+// for it immediately rather than waiting for a subsequent request to hit the
+// same failure again.
+type goneNotifiable interface{ SetGoneCallback(func()) }
 
 // touchReader wraps a Reader and pings onRead whenever bytes are read, so an
 // active stream keeps its session's idle timer fresh for its whole duration.
@@ -377,21 +419,51 @@ func (m *Manager) Remove(id string) bool {
 	return true
 }
 
-// remove drops the torrent, unmaps the session, and deletes its on-disk data.
+// remove unmaps the session and drops/cleans up its underlying torrent.
 func (m *Manager) remove(s *Session) {
 	m.mu.Lock()
 	delete(m.sessions, s.ID)
 	delete(m.byInfohash, s.Infohash)
 	m.mu.Unlock()
 
-	s.t.Drop()
+	m.dropAndCleanup(s)
+}
+
+// dropAndCleanup drops a session's torrent and deletes its on-disk data. If Drop
+// fails (e.g. the qBittorrent engine's backing instance is unreachable), the
+// session is queued for retry on the next GC tick instead of being silently
+// abandoned — otherwise its data could stay orphaned until the next process
+// restart, which for a long-lived container could be a very long time.
+func (m *Manager) dropAndCleanup(s *Session) {
+	if err := s.t.Drop(); err != nil {
+		log.Printf("streamer: session %s drop failed, will retry: %v", s.ID, err)
+		m.mu.Lock()
+		m.pendingRemoval = append(m.pendingRemoval, s)
+		m.mu.Unlock()
+		return
+	}
 	// anacrolix lays a torrent's data out under DataDir keyed by its name (a
 	// directory for multi-file torrents, the file itself for single-file).
-	// Remove both the name- and infohash-keyed paths to be safe.
+	// Remove both the name- and infohash-keyed paths to be safe. For the
+	// qBittorrent engine, Drop() already deleted the data via the API, so these
+	// are harmless no-ops (the paths never existed under cfg.DownloadDir).
 	if s.Name != "" {
 		_ = os.RemoveAll(filepath.Join(m.cfg.DownloadDir, s.Name))
 	}
 	_ = os.RemoveAll(filepath.Join(m.cfg.DownloadDir, s.Infohash))
+}
+
+// retryPendingRemovals retries Drop() for sessions whose removal previously
+// failed. Called once per GC tick, bounding retry cadence to GCInterval.
+func (m *Manager) retryPendingRemovals() {
+	m.mu.Lock()
+	pending := m.pendingRemoval
+	m.pendingRemoval = nil
+	m.mu.Unlock()
+
+	for _, s := range pending {
+		m.dropAndCleanup(s) // re-appends to m.pendingRemoval on repeat failure
+	}
 }
 
 // StartGC launches the background idle-collection loop.
@@ -407,6 +479,7 @@ func (m *Manager) StartGC() {
 				return
 			case <-ticker.C:
 				m.collectIdle()
+				m.retryPendingRemovals()
 			}
 		}
 	}()

@@ -21,12 +21,19 @@ func contextWithTimeout(r *http.Request, d time.Duration) (context.Context, cont
 type Handler struct {
 	mgr *Manager
 	cfg Config
+	dm  *DownloadManager // optional; nil means the download-manager feature is off
 }
 
 // NewHandler wires a Handler over a Manager.
 func NewHandler(mgr *Manager, cfg Config) *Handler {
 	return &Handler{mgr: mgr, cfg: cfg}
 }
+
+// SetDownloadManager attaches the download-manager feature (docs/STREAMING.md
+// §6). A separate setter (rather than a NewHandler parameter) keeps the
+// existing constructor's signature — and handlers_test.go, which calls it —
+// untouched; Routes() only mounts /download-api/* when this has been called.
+func (h *Handler) SetDownloadManager(dm *DownloadManager) { h.dm = dm }
 
 // Routes returns the service's http.Handler with all endpoints mounted.
 func (h *Handler) Routes() http.Handler {
@@ -41,6 +48,9 @@ func (h *Handler) Routes() http.Handler {
 	// redirect that Go's mux would otherwise issue to /{id}/{index}/.
 	mux.HandleFunc("GET /stream/{id}/{index}", h.streamFile)
 	mux.HandleFunc("GET /healthz", h.health)
+	if h.dm != nil {
+		registerDownloadRoutes(mux, h)
+	}
 	return mux
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -248,6 +249,161 @@ func TestOpenFile_ReadKeepsSessionAlive(t *testing.T) {
 	mgr.mu.Unlock()
 	if !alive {
 		t.Error("session with an active read must not be garbage collected")
+	}
+}
+
+func TestRemove_RetriesFailedDrop(t *testing.T) {
+	client := newFakeClient(readyTorrent("M", &fakeFile{path: "a.mp4", data: []byte("x")}))
+	mgr := NewManager(testConfig(t), client)
+	defer mgr.Close()
+
+	s, err := mgr.AddSession(context.Background(), "magnet:?xt=urn:btih:AAA")
+	if err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+	tor := client.byIH["AAA"]
+	tor.dropErr = errors.New("qbittorrent unreachable")
+
+	if !mgr.Remove(s.ID) {
+		t.Fatal("Remove should return true even when the underlying Drop fails")
+	}
+	// The session must be unservable immediately, regardless of Drop's outcome.
+	if _, ok := mgr.Get(s.ID); ok {
+		t.Fatal("session should be gone from bookkeeping immediately")
+	}
+	if tor.wasDropped() {
+		t.Fatal("torrent should not be marked dropped yet (Drop failed)")
+	}
+	mgr.mu.Lock()
+	n := len(mgr.pendingRemoval)
+	mgr.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("expected 1 pending removal, got %d", n)
+	}
+
+	// Next GC tick retries; dropErr was cleared after the first (failing) call, so
+	// this attempt succeeds.
+	mgr.retryPendingRemovals()
+	if !tor.wasDropped() {
+		t.Error("torrent should be dropped after a successful retry")
+	}
+	mgr.mu.Lock()
+	n = len(mgr.pendingRemoval)
+	mgr.mu.Unlock()
+	if n != 0 {
+		t.Errorf("pending removal should be cleared after success, got %d", n)
+	}
+}
+
+// fakePrioritizingTorrent additionally implements filePrioritizer, simulating the
+// qBittorrent engine's file-priority-on-pick behavior (anacrolix's fakeTorrent
+// deliberately does not implement this interface).
+type fakePrioritizingTorrent struct {
+	fakeTorrent
+	mu          sync.Mutex
+	prioritized []int
+}
+
+func (t *fakePrioritizingTorrent) PrioritizeFile(index int) {
+	t.mu.Lock()
+	t.prioritized = append(t.prioritized, index)
+	t.mu.Unlock()
+}
+
+type fakePrioritizingClient struct{ t *fakePrioritizingTorrent }
+
+func (c *fakePrioritizingClient) AddMagnet(uri string) (Torrent, error) { return c.t, nil }
+func (c *fakePrioritizingClient) Close()                                {}
+
+func TestOpenFile_PrioritizesPickedFile(t *testing.T) {
+	tor := &fakePrioritizingTorrent{fakeTorrent: fakeTorrent{
+		infohash: "AAA",
+		name:     "M",
+		gotInfo:  closedChan(),
+		files:    []TorrentFile{&fakeFile{path: "a.mp4", data: []byte("0123456789")}},
+	}}
+	mgr := NewManager(testConfig(t), &fakePrioritizingClient{t: tor})
+	defer mgr.Close()
+
+	s, err := mgr.AddSession(context.Background(), "magnet:?xt=urn:btih:AAA")
+	if err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+	r, _, err := mgr.OpenFile(s.ID, 0)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	defer r.Close()
+
+	tor.mu.Lock()
+	got := tor.prioritized
+	tor.mu.Unlock()
+	if len(got) != 1 || got[0] != 0 {
+		t.Errorf("expected PrioritizeFile(0) called once, got %v", got)
+	}
+}
+
+func TestOpenFile_NonPrioritizingEngineUnaffected(t *testing.T) {
+	// readyTorrent's *fakeTorrent doesn't implement filePrioritizer; OpenFile must
+	// simply no-op the type assertion rather than erroring or panicking.
+	mgr := NewManager(testConfig(t), newFakeClient(readyTorrent("M", &fakeFile{path: "a.mp4", data: []byte("x")})))
+	defer mgr.Close()
+	s, err := mgr.AddSession(context.Background(), "magnet:?xt=urn:btih:AAA")
+	if err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+	r, _, err := mgr.OpenFile(s.ID, 0)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	_ = r.Close()
+}
+
+// fakeGoneNotifiableTorrent additionally implements goneNotifiable, simulating
+// the qBittorrent engine's out-of-band-deletion detection.
+type fakeGoneNotifiableTorrent struct {
+	fakeTorrent
+	mu       sync.Mutex
+	callback func()
+}
+
+func (t *fakeGoneNotifiableTorrent) SetGoneCallback(fn func()) {
+	t.mu.Lock()
+	t.callback = fn
+	t.mu.Unlock()
+}
+
+func (t *fakeGoneNotifiableTorrent) triggerGone() {
+	t.mu.Lock()
+	fn := t.callback
+	t.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+type fakeGoneNotifiableClient struct{ t *fakeGoneNotifiableTorrent }
+
+func (c *fakeGoneNotifiableClient) AddMagnet(uri string) (Torrent, error) { return c.t, nil }
+func (c *fakeGoneNotifiableClient) Close()                                {}
+
+func TestAddSession_WiresGoneCallback(t *testing.T) {
+	tor := &fakeGoneNotifiableTorrent{fakeTorrent: fakeTorrent{
+		infohash: "AAA", name: "M", gotInfo: closedChan(),
+		files: []TorrentFile{&fakeFile{path: "a.mp4", data: []byte("x")}},
+	}}
+	mgr := NewManager(testConfig(t), &fakeGoneNotifiableClient{t: tor})
+	defer mgr.Close()
+
+	s, err := mgr.AddSession(context.Background(), "magnet:?xt=urn:btih:AAA")
+	if err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	tor.triggerGone()
+
+	if _, ok := mgr.Get(s.ID); ok {
+		t.Error("session should be removed from bookkeeping after the gone-callback fires")
 	}
 }
 

@@ -81,6 +81,16 @@ Open http://localhost:5173.
 | `STREAM_METADATA_TIMEOUT` | `docker-compose.yml` / env | Seconds to wait for torrent metadata from DHT/peers before returning a timeout error (default `45`). |
 | `STREAM_TRACKERS_URLS` | `docker-compose.yml` / env | Comma-separated URLs of public tracker lists to fetch and add to every torrent. Empty/unset = use built-in defaults; `none` = disable tracker augmentation. |
 | `STREAM_TRACKERS_REFRESH` | `docker-compose.yml` / env | How often (seconds) to refresh the tracker lists (default `21600` = 6 h). |
+| `STREAM_ENGINE` | env | BitTorrent **streaming** engine: `anacrolix` (default, unchanged behavior) or `qbittorrent`. See [docs/STREAMING.md §5](docs/STREAMING.md) for the qBittorrent-engine design. Cannot be `qbittorrent` at the same time as `DOWNLOAD_ENGINE=qbittorrent` — the streamer fails to start if both are set (see §6). |
+| `DOWNLOAD_ENGINE` | env | Persistent **download-manager** feature: unset (default, feature absent) or `qbittorrent`. Independent of `STREAM_ENGINE` — adds a separate "Download" action/page. See [docs/STREAMING.md §6](docs/STREAMING.md). |
+| `STREAM_QBIT_HOST` | env | Base URL of a running qBittorrent Web UI (e.g. `http://localhost:8080`). Empty disables qBittorrent entirely on the default (`anacrolix`) engine; **required** when `STREAM_ENGINE=qbittorrent` or `DOWNLOAD_ENGINE=qbittorrent`. |
+| `STREAM_QBIT_USER` / `STREAM_QBIT_PASS` | env | qBittorrent Web UI credentials (default `admin` / `adminadmin`); shared by both the streaming and download engines. |
+| `STREAM_QBIT_REMOTE_ROOT` | env | Save-path root as qBittorrent itself sees it (e.g. `/data/downloads`). **Required** when `STREAM_ENGINE=qbittorrent` or `DOWNLOAD_ENGINE=qbittorrent`. |
+| `STREAM_QBIT_DOWNLOAD_DIR` | env | Local filesystem root the streamer container sees for that same directory (the bind-mount target). **Required** when `STREAM_ENGINE=qbittorrent` or `DOWNLOAD_ENGINE=qbittorrent`; validated at startup. |
+| `STREAM_QBIT_CATEGORY` | env | qBittorrent category tag applied to torrents the **streaming** qbittorrent engine adds (default `tsa-stream-engine`); purged on every startup for a clean slate. |
+| `STREAM_QBIT_POLL_INTERVAL` | env | Seconds between metadata-readiness and piece-state polls; shared by both the streaming and download engines (default `1`). |
+| `DOWNLOAD_QBIT_CATEGORY` | env | qBittorrent category tag applied to torrents the **download-manager** feature adds (default `tsa-download`). **Never** purged on startup — downloads are intentionally persistent. See [docs/STREAMING.md §6](docs/STREAMING.md). |
+| `DOWNLOAD_UNSELECTED_TIMEOUT` | env | Seconds a download-manager torrent may sit with **no file ever selected** (e.g. opened the file picker, never picked anything) before it's automatically removed from qBittorrent (default `900` = 15 min). A torrent with at least one selected file is never touched by this, regardless of age. See [docs/STREAMING.md §6](docs/STREAMING.md). |
 
 ## Run with Docker
 

@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -41,11 +42,45 @@ type Config struct {
 	DHTStateFile string
 	// QBitHost is the base URL of a running qBittorrent Web UI
 	// (e.g. "http://localhost:8080"). Empty string disables qBittorrent peer
-	// injection entirely.
+	// injection entirely (anacrolix engine) or is required (qbittorrent engine).
 	QBitHost string
 	// QBitUser and QBitPass are the Web UI credentials (default: admin / adminadmin).
 	QBitUser string
 	QBitPass string
+
+	// Engine selects the BitTorrent download engine: "anacrolix" (default) or
+	// "qbittorrent". Anything else falls back to "anacrolix".
+	Engine string
+	// QBitRemoteRoot is qBittorrent's save-path root as qBittorrent itself sees it
+	// (e.g. "/data/downloads"). Required when Engine is "qbittorrent".
+	QBitRemoteRoot string
+	// QBitDownloadDir is the local filesystem root the streamer container sees for
+	// that same directory (the bind-mount target). Required when Engine is
+	// "qbittorrent".
+	QBitDownloadDir string
+	// QBitCategory tags torrents the qbittorrent engine adds, so a restart can
+	// purge orphans from a prior crash without touching unrelated torrents in a
+	// shared qBittorrent instance.
+	QBitCategory string
+	// QBitPollInterval is how often the qbittorrent engine polls for
+	// metadata-readiness and piece-state.
+	QBitPollInterval time.Duration
+
+	// DownloadEngine enables the persistent download-manager feature when set
+	// to "qbittorrent". Empty (default) means the feature is entirely absent.
+	// Independent of Engine — see docs/STREAMING.md §6.
+	DownloadEngine string
+	// DownloadQBitCategory tags torrents the download-manager feature adds.
+	// Unlike QBitCategory, this is never purged on startup: downloads are
+	// intentionally persistent (Decision #22).
+	DownloadQBitCategory string
+	// DownloadUnselectedTimeout is how long a download-manager torrent may
+	// sit with no file selected (e.g. the user opened the file picker to see
+	// what's in a magnet, then never picked anything) before it's
+	// automatically removed. Does not apply once at least one file has been
+	// selected — that torrent is a real, intentional download and is never
+	// swept (Decision #26).
+	DownloadUnselectedTimeout time.Duration
 }
 
 // LoadConfig reads configuration from the environment, applying defaults for
@@ -61,12 +96,35 @@ func LoadConfig() Config {
 		TrackersURLs:    trackerURLs(),
 		TrackersRefresh: envSeconds("STREAM_TRACKERS_REFRESH", 21600), // 6h
 		TrackersTimeout: envSeconds("STREAM_TRACKERS_TIMEOUT", 15),
-		TorrentPort:  envInt("STREAM_TORRENT_PORT", 6881),
-		DHTStateFile: envStr("STREAM_DHT_STATE_FILE", "/data/dht-state.json"),
-		QBitHost:     envStr("STREAM_QBIT_HOST", ""),
-		QBitUser:     envStr("STREAM_QBIT_USER", "admin"),
-		QBitPass:     envStr("STREAM_QBIT_PASS", "adminadmin"),
+		TorrentPort:     envInt("STREAM_TORRENT_PORT", 6881),
+		DHTStateFile:    envStr("STREAM_DHT_STATE_FILE", "/data/dht-state.json"),
+		QBitHost:        envStr("STREAM_QBIT_HOST", ""),
+		QBitUser:        envStr("STREAM_QBIT_USER", "admin"),
+		QBitPass:        envStr("STREAM_QBIT_PASS", "adminadmin"),
+
+		Engine:           envStr("STREAM_ENGINE", "anacrolix"),
+		QBitRemoteRoot:   envStr("STREAM_QBIT_REMOTE_ROOT", ""),
+		QBitDownloadDir:  envStr("STREAM_QBIT_DOWNLOAD_DIR", ""),
+		QBitCategory:     envStr("STREAM_QBIT_CATEGORY", "tsa-stream-engine"),
+		QBitPollInterval: envSeconds("STREAM_QBIT_POLL_INTERVAL", 1),
+
+		DownloadEngine:            envStr("DOWNLOAD_ENGINE", ""),
+		DownloadQBitCategory:      envStr("DOWNLOAD_QBIT_CATEGORY", "tsa-download"),
+		DownloadUnselectedTimeout: envSeconds("DOWNLOAD_UNSELECTED_TIMEOUT", 900), // 15m
 	}
+}
+
+// ValidateEngines rejects invalid combinations of Engine and DownloadEngine.
+// STREAM_ENGINE=qbittorrent and DOWNLOAD_ENGINE=qbittorrent can never both be
+// active in the same process (docs/STREAMING.md §6 Decision #25): nothing in
+// the design needs two qBittorrent-backed engines against the same instance,
+// and allowing it would add a permanently-live edge case for no functional
+// benefit. Pure/no I/O so it can run before any network call.
+func (c Config) ValidateEngines() error {
+	if c.Engine == "qbittorrent" && c.DownloadEngine == "qbittorrent" {
+		return fmt.Errorf("STREAM_ENGINE=qbittorrent and DOWNLOAD_ENGINE=qbittorrent cannot both be enabled — use STREAM_ENGINE=anacrolix with DOWNLOAD_ENGINE=qbittorrent instead")
+	}
+	return nil
 }
 
 // trackerURLs resolves STREAM_TRACKERS_URLS. Unset or empty → the built-in

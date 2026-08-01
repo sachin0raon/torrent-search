@@ -31,7 +31,9 @@ export default function CopyButton({ value, label = 'Copy magnet', className = '
   return (
     <button className={className} onClick={onCopy} disabled={!value}>
       {copied ? <Check size={14} /> : <Copy size={14} />}
-      {copied ? 'Copied' : label}
+      {/* Wrapped so narrow-screen CSS can drop the label and keep just the
+          icon, without touching the icon itself. */}
+      <span className="btn-label">{copied ? 'Copied' : label}</span>
     </button>
   );
 }

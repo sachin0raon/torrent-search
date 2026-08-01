@@ -1,15 +1,29 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronDown, ChevronUp, Zap } from 'lucide-react';
+import { ChevronDown, ChevronUp, Zap, Download } from 'lucide-react';
 import { api } from '../api/client.js';
 import CopyButton from './CopyButton.jsx';
 import StreamPanel from './StreamPanel.jsx';
+import DownloadPanel from './DownloadPanel.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
+import { useDownloadsEnabled } from '../downloadCapabilityContext.jsx';
 import { collapsePanel } from '../motion.js';
 
 // One link row inside an expanded forum topic. Owns its own stream-open state.
 function ForumLinkRow({ link }) {
   const [streamOpen, setStreamOpen] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const downloadsEnabled = useDownloadsEnabled();
+
+  function toggleStream() {
+    setDownloadOpen(false);
+    setStreamOpen((o) => !o);
+  }
+  function toggleDownload() {
+    setStreamOpen(false);
+    setDownloadOpen((o) => !o);
+  }
+
   return (
     <div>
       <div className="forum-link-row">
@@ -22,10 +36,16 @@ function ForumLinkRow({ link }) {
           ) : null}
           {link.magnet ? (
             <>
-              <button onClick={() => setStreamOpen((o) => !o)}>
+              <button onClick={toggleStream}>
                 <Zap size={13} />
-                {streamOpen ? 'Hide stream' : 'Stream'}
+                <span className="btn-label">{streamOpen ? 'Hide stream' : 'Stream'}</span>
               </button>
+              {downloadsEnabled ? (
+                <button onClick={toggleDownload}>
+                  <Download size={13} />
+                  <span className="btn-label">{downloadOpen ? 'Hide download' : 'Download'}</span>
+                </button>
+              ) : null}
               <CopyButton value={link.magnet} className="" />
             </>
           ) : (
@@ -37,6 +57,11 @@ function ForumLinkRow({ link }) {
         {streamOpen && (
           <motion.div key="stream" {...collapsePanel} style={{ overflow: 'hidden' }}>
             <StreamPanel magnet={link.magnet} />
+          </motion.div>
+        )}
+        {downloadOpen && (
+          <motion.div key="download" {...collapsePanel} style={{ overflow: 'hidden' }}>
+            <DownloadPanel magnet={link.magnet} />
           </motion.div>
         )}
       </AnimatePresence>

@@ -34,6 +34,16 @@ export function buildStreamUrl(sessionId, fileIndex, filename, origin = window.l
   return `${origin}/stream/${sessionId}/${fileIndex}/${enc(filename)}`;
 }
 
+// buildDownloadUrl composes the absolute, same-origin URL for one file
+// tracked by the persistent download manager (docs/STREAMING.md §6) — same
+// shape as buildStreamUrl, but under /download-api/stream/ and keyed by the
+// qBittorrent torrent hash rather than a Stream session id. Appending
+// ?dl=1 requests a plain-download (Content-Disposition: attachment) response
+// instead of the inline one player deep links expect.
+export function buildDownloadUrl(hash, fileIndex, filename, origin = window.location.origin) {
+  return `${origin}/download-api/stream/${hash}/${fileIndex}/${enc(filename)}`;
+}
+
 // playerLinks returns [{ id, label, href }] deep links for a stream URL.
 export function playerLinks(streamUrl, fileName) {
   return PLAYERS.map((p) => ({ id: p.id, label: p.label, href: p.build(streamUrl, fileName) }));

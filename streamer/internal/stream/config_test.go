@@ -1,6 +1,9 @@
 package stream
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestTrackerURLs(t *testing.T) {
 	t.Run("empty falls back to defaults", func(t *testing.T) {
@@ -26,4 +29,96 @@ func TestTrackerURLs(t *testing.T) {
 			t.Errorf("unexpected list: %v", got)
 		}
 	})
+}
+
+func TestLoadConfig_QBitEngineDefaults(t *testing.T) {
+	for _, v := range []string{
+		"STREAM_ENGINE", "STREAM_QBIT_REMOTE_ROOT", "STREAM_QBIT_DOWNLOAD_DIR",
+		"STREAM_QBIT_CATEGORY", "STREAM_QBIT_POLL_INTERVAL",
+	} {
+		t.Setenv(v, "")
+	}
+	cfg := LoadConfig()
+	if cfg.Engine != "anacrolix" {
+		t.Errorf("Engine default = %q, want %q", cfg.Engine, "anacrolix")
+	}
+	if cfg.QBitRemoteRoot != "" {
+		t.Errorf("QBitRemoteRoot default = %q, want empty", cfg.QBitRemoteRoot)
+	}
+	if cfg.QBitDownloadDir != "" {
+		t.Errorf("QBitDownloadDir default = %q, want empty", cfg.QBitDownloadDir)
+	}
+	if cfg.QBitCategory != "tsa-stream-engine" {
+		t.Errorf("QBitCategory default = %q, want %q", cfg.QBitCategory, "tsa-stream-engine")
+	}
+	if cfg.QBitPollInterval != time.Second {
+		t.Errorf("QBitPollInterval default = %v, want 1s", cfg.QBitPollInterval)
+	}
+}
+
+func TestValidateEngines(t *testing.T) {
+	tests := []struct {
+		name           string
+		engine         string
+		downloadEngine string
+		wantErr        bool
+	}{
+		{"both unset", "", "", false},
+		{"anacrolix + download qbittorrent (the typical case)", "anacrolix", "qbittorrent", false},
+		{"stream qbittorrent, download unset", "qbittorrent", "", false},
+		{"both qbittorrent is rejected", "qbittorrent", "qbittorrent", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{Engine: tc.engine, DownloadEngine: tc.downloadEngine}
+			err := cfg.ValidateEngines()
+			if tc.wantErr && err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_DownloadEngineDefaults(t *testing.T) {
+	t.Setenv("DOWNLOAD_ENGINE", "")
+	t.Setenv("DOWNLOAD_QBIT_CATEGORY", "")
+	t.Setenv("DOWNLOAD_UNSELECTED_TIMEOUT", "")
+	cfg := LoadConfig()
+	if cfg.DownloadEngine != "" {
+		t.Errorf("DownloadEngine default = %q, want empty", cfg.DownloadEngine)
+	}
+	if cfg.DownloadQBitCategory != "tsa-download" {
+		t.Errorf("DownloadQBitCategory default = %q, want %q", cfg.DownloadQBitCategory, "tsa-download")
+	}
+	if cfg.DownloadUnselectedTimeout != 15*time.Minute {
+		t.Errorf("DownloadUnselectedTimeout default = %v, want 15m", cfg.DownloadUnselectedTimeout)
+	}
+}
+
+func TestLoadConfig_QBitEngineExplicit(t *testing.T) {
+	t.Setenv("STREAM_ENGINE", "qbittorrent")
+	t.Setenv("STREAM_QBIT_REMOTE_ROOT", "/data/downloads")
+	t.Setenv("STREAM_QBIT_DOWNLOAD_DIR", "/mnt/qbit-downloads")
+	t.Setenv("STREAM_QBIT_CATEGORY", "my-category")
+	t.Setenv("STREAM_QBIT_POLL_INTERVAL", "2")
+
+	cfg := LoadConfig()
+	if cfg.Engine != "qbittorrent" {
+		t.Errorf("Engine = %q, want %q", cfg.Engine, "qbittorrent")
+	}
+	if cfg.QBitRemoteRoot != "/data/downloads" {
+		t.Errorf("QBitRemoteRoot = %q", cfg.QBitRemoteRoot)
+	}
+	if cfg.QBitDownloadDir != "/mnt/qbit-downloads" {
+		t.Errorf("QBitDownloadDir = %q", cfg.QBitDownloadDir)
+	}
+	if cfg.QBitCategory != "my-category" {
+		t.Errorf("QBitCategory = %q", cfg.QBitCategory)
+	}
+	if cfg.QBitPollInterval != 2*time.Second {
+		t.Errorf("QBitPollInterval = %v, want 2s", cfg.QBitPollInterval)
+	}
 }
