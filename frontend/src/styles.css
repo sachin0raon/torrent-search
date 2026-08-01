@@ -465,7 +465,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .forum-link-row .actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 
 /* ---- Inline stream panel ---- */
-.stream-panel { position: relative; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--hairline); }
+.stream-panel { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--hairline); }
 .stream-panel .stream-files { margin-top: 0; }
 
 /* ---- Stream modal file list ---- */
@@ -480,19 +480,20 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .download-select-all { border: none; padding: 2px 12px 8px; font-weight: 600; }
 .download-select-all .fname { flex: none; font-size: 12px; color: var(--muted); }
 
-/* Floating download-start button: sits outside .stream-files' own scrollable
-   area (a sibling in the DOM, absolutely positioned over .stream-panel), so
-   unlike the old sticky in-list bar it never sits in front of scrolled
-   content and never needs a backdrop to mask it — a small floating pill
-   overlapping a corner of the list is an expected FAB pattern, not a hard
-   box. Only rendered once a file is selected (DownloadPanel.jsx). Matches
-   the app's existing floating-button language (.scroll-top-btn/.stats-fab):
-   dark blurred glass, not the bright primary-CTA gradient — this is an
-   overlay control, not a page-level call to action. */
+/* Floating download-start button: fixed to the viewport's bottom-right
+   corner (same corner/size as .scroll-top-btn, offset to its left so the
+   two never overlap once both are visible), not confined to the local
+   .stream-panel box — it needs to read as a real page-level floating
+   action button, the same family as .scroll-top-btn/.stats-fab, not a
+   control pinned to wherever its result row happens to scroll to. Sitting
+   outside .stream-files' own scrollable area (a DOM sibling) also means it
+   never sits in front of scrolled content and never needs a backdrop to
+   mask it. Only rendered once a file is selected (DownloadPanel.jsx). */
 .download-fab {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
+  position: fixed;
+  right: 82px;
+  bottom: 24px;
+  z-index: 46;
   height: 46px;
   padding: 0 18px;
   display: inline-flex;
@@ -510,6 +511,10 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .download-fab:hover { color: #fff; background: rgba(20, 20, 24, 0.85); }
 .player-links { padding-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
 .player-btn { white-space: nowrap; }
+/* Downloads modal file row: Copy link / Download file shrink to icon-only
+   so the row (3 player deep links + these two) fits on one line. */
+.player-btn.icon-only { padding: 7px 10px; }
+.player-btn.icon-only .btn-label { display: none; }
 
 /* ---- Modal ---- */
 .modal-backdrop {
@@ -671,6 +676,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   .player-btn { font-size: 13px; padding: 8px 14px; }
 
   .scroll-top-btn { bottom: 16px; right: 16px; }
+  .download-fab { bottom: 16px; right: 70px; }
 
   /* Source tabs: 4 tabs no longer fit on one line on narrow screens —
      wrap into a 2-column grid instead of forcing horizontal scroll. */

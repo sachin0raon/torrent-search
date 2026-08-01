@@ -191,6 +191,32 @@ func TestDownloadManager_List_FiltersByCategory(t *testing.T) {
 	}
 }
 
+// TestDownloadManager_List_MostRecentlyAddedFirst covers the Downloads UI's
+// "recently added at the top" ordering: qBittorrent's own list order isn't
+// guaranteed to track add order, so List sorts by AddedOn itself.
+func TestDownloadManager_List_MostRecentlyAddedFirst(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newTestDownloadManager(t, fake)
+	fake.torrents["oldest"] = qbt.Torrent{Hash: "oldest", Category: "tsa-download", AddedOn: 100}
+	fake.torrents["newest"] = qbt.Torrent{Hash: "newest", Category: "tsa-download", AddedOn: 300}
+	fake.torrents["middle"] = qbt.Torrent{Hash: "middle", Category: "tsa-download", AddedOn: 200}
+
+	list, err := m.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 3 {
+		t.Fatalf("expected 3 torrents, got %d", len(list))
+	}
+	got := []string{list[0].Hash, list[1].Hash, list[2].Hash}
+	want := []string{"newest", "middle", "oldest"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected order %v, got %v", want, got)
+		}
+	}
+}
+
 func TestDownloadManager_Get_NotFound(t *testing.T) {
 	fake := newFakeQbtAPI()
 	m := newTestDownloadManager(t, fake)

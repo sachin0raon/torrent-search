@@ -125,12 +125,14 @@ export default function DownloadPanel({ magnet }) {
           )}
         </div>
       ) : null}
-      {/* Floating rather than an inline/sticky row: it lives outside
-          .stream-files' scrollable area entirely, so unlike the old
-          sticky start bar it never overlaps or needs to mask scrolled-past
-          file rows. Shows only once something's selected, and disappears
-          again once the download request lands (started -> true hides the
-          whole selection UI above, this included). */}
+      {/* Fixed to the viewport's bottom-right corner (styles.css), like the
+          app's other floating buttons — not confined to this row's own
+          box, and outside .stream-files' scrollable area entirely, so
+          unlike the old sticky start bar it never overlaps or needs to
+          mask scrolled-past file rows. Shows only once something's
+          selected, and disappears again once the download request lands
+          (started -> true hides the whole selection UI above, this
+          included). */}
       <AnimatePresence>
         {torrent && !started && selected.size > 0 ? (
           <motion.button

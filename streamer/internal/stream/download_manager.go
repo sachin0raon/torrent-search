@@ -394,6 +394,11 @@ func (m *DownloadManager) List(ctx context.Context) ([]DownloadInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("download: list: %w", err)
 	}
+	// Most recently added first — qBittorrent's own list order isn't
+	// guaranteed to reflect add order, and the Downloads UI wants the
+	// torrent you just started at the top rather than buried under older
+	// entries.
+	sort.Slice(torrents, func(i, j int) bool { return torrents[i].AddedOn > torrents[j].AddedOn })
 	out := make([]DownloadInfo, len(torrents))
 	for i, t := range torrents {
 		out[i] = DownloadInfo{

@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Trash2, PlayCircle, Download } from 'lucide-react';
 import { downloader } from '../api/downloader.js';
 import { buildDownloadUrl, playerLinks, baseName } from '../playerLinks.js';
 import { fadeUp, spring, collapsePanel } from '../motion.js';
@@ -23,16 +23,24 @@ function DownloadFileRow({ hash, file }) {
       <div className="stats-file-meta">
         {pct}% &middot; {formatSize(file.downloaded)} / {formatSize(file.size)}
       </div>
+      {/* Copy link + Download file are icon-only here (unlike other CopyButton
+          spots) so this five-button row — 3 player deep links plus these two
+          — fits on one line instead of wrapping. */}
       <div className="player-links">
         {links.map((l) => (
           <a key={l.id} href={l.href} rel="noreferrer">
-            <button className="player-btn">{l.label}</button>
+            <button className="player-btn">
+              <PlayCircle size={14} />
+              {l.label}
+            </button>
           </a>
         ))}
         <a href={`${url}?dl=1`}>
-          <button className="player-btn">Download file</button>
+          <button className="player-btn icon-only" title="Download file" aria-label="Download file">
+            <Download size={14} />
+          </button>
         </a>
-        <CopyButton value={url} label="Copy link" className="" />
+        <CopyButton value={url} label="Copy link" className="player-btn icon-only" />
       </div>
     </div>
   );
