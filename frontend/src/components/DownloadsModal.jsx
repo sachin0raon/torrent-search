@@ -53,20 +53,38 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete }) {
   const [deleting, setDeleting] = useState(false);
   const pct = Math.round((progress ?? 0) * 100);
 
-  async function toggle() {
-    const next = !expanded;
-    setExpanded(next);
-    if (next && files === null && !loadingFiles) {
-      setLoadingFiles(true);
+  // Per-file progress needs its own live poll while expanded — the parent
+  // list poll (below) only ever refreshes each torrent's aggregate progress,
+  // so without this a season pack's individual file percentages would freeze
+  // at whatever they were the moment the card was expanded.
+  useEffect(() => {
+    if (!expanded) return undefined;
+    let active = true;
+
+    async function loadFiles() {
       try {
         const detail = await downloader.getDownload(hash);
-        setFiles((detail.files || []).filter((f) => f.selected));
+        if (active) setFiles((detail.files || []).filter((f) => f.selected));
       } catch {
-        setFiles([]);
+        // Transient failure — keep showing the last-known file list rather
+        // than blanking it, unless this was the very first load.
+        if (active) setFiles((prev) => prev ?? []);
       } finally {
-        setLoadingFiles(false);
+        if (active) setLoadingFiles(false);
       }
     }
+
+    setLoadingFiles(true);
+    loadFiles();
+    const id = setInterval(loadFiles, POLL_INTERVAL);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [expanded, hash]);
+
+  function toggle() {
+    setExpanded((e) => !e);
   }
 
   async function handleDelete() {

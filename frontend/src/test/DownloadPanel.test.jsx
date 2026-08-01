@@ -58,4 +58,39 @@ describe('DownloadPanel', () => {
     render(<DownloadPanel magnet="magnet:?xt=1" />);
     expect(await screen.findByText('No files in this torrent.')).toBeInTheDocument();
   });
+
+  it('a "Select all" toggle selects and deselects every file', async () => {
+    downloader.createDownload.mockResolvedValue({
+      hash: 'aaaa',
+      name: 'Season Pack',
+      files: [
+        { index: 0, name: 'S01E01.mkv', size: 1000 },
+        { index: 1, name: 'S01E02.mkv', size: 2000 },
+        { index: 2, name: 'S01E03.mkv', size: 3000 },
+      ],
+    });
+    render(<DownloadPanel magnet="magnet:?xt=1" />);
+    expect(await screen.findByText('S01E01.mkv')).toBeInTheDocument();
+
+    const selectAll = screen.getByRole('checkbox', { name: /select all/i });
+    const fileCheckboxes = () => screen.getAllByRole('checkbox').filter((cb) => cb !== selectAll);
+
+    await userEvent.click(selectAll);
+    expect(fileCheckboxes().every((cb) => cb.checked)).toBe(true);
+    expect(screen.getByRole('button', { name: /download 3 files/i })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('checkbox', { name: /deselect all/i }));
+    expect(fileCheckboxes().every((cb) => !cb.checked)).toBe(true);
+  });
+
+  it('does not show a "Select all" toggle for a single-file torrent', async () => {
+    downloader.createDownload.mockResolvedValue({
+      hash: 'aaaa',
+      name: 'Movie',
+      files: [{ index: 0, name: 'movie.mkv', size: 1000 }],
+    });
+    render(<DownloadPanel magnet="magnet:?xt=1" />);
+    expect(await screen.findByText('movie.mkv')).toBeInTheDocument();
+    expect(screen.queryByText(/select all/i)).not.toBeInTheDocument();
+  });
 });

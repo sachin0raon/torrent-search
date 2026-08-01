@@ -73,6 +73,41 @@ describe('DownloadsModal', () => {
     await waitFor(() => expect(screen.queryByText('Movie')).not.toBeInTheDocument());
   });
 
+  // Regression: file detail used to be fetched once on first expand and
+  // cached forever, so a season pack's individual file progress froze at
+  // whatever it was when the card was first opened, even though the parent
+  // card's aggregate progress kept updating. Re-fetching on every expand
+  // (a stand-in here for the live poll-while-expanded behavior — see
+  // DownloadsModal.jsx's per-card useEffect) is what makes it not stuck.
+  it('refreshes per-file progress on every expand rather than caching it forever', async () => {
+    downloader.listDownloads.mockResolvedValue([
+      { hash: 'aaaa', name: 'Season Pack', state: 'downloading', progress: 0.4, dlspeed: 1024, size: 2000 },
+    ]);
+    downloader.getDownload
+      .mockResolvedValueOnce({
+        hash: 'aaaa',
+        name: 'Season Pack',
+        files: [{ index: 0, name: 'e01.mkv', size: 1000, downloaded: 200, selected: true }],
+      })
+      .mockResolvedValueOnce({
+        hash: 'aaaa',
+        name: 'Season Pack',
+        files: [{ index: 0, name: 'e01.mkv', size: 1000, downloaded: 800, selected: true }],
+      });
+
+    render(<DownloadsModal onClose={vi.fn()} />);
+    expect(await screen.findByText('Season Pack')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /show files/i }));
+    expect(await screen.findByText(/20%/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /hide files/i }));
+    await userEvent.click(screen.getByRole('button', { name: /show files/i }));
+
+    expect(await screen.findByText(/80%/)).toBeInTheDocument();
+    expect(downloader.getDownload).toHaveBeenCalledTimes(2);
+  });
+
   it('shows an error state when the download manager is unreachable', async () => {
     downloader.listDownloads.mockRejectedValue(new Error('qbittorrent unavailable'));
     render(<DownloadsModal onClose={vi.fn()} />);

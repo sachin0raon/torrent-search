@@ -477,6 +477,24 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .download-file-row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .download-file-row .fname { word-break: break-word; font-size: 13px; min-width: 0; flex: 1; }
 .download-file-row .notice { flex: none; }
+.download-select-all { border: none; padding: 2px 12px 8px; font-weight: 600; }
+.download-select-all .fname { flex: none; font-size: 12px; color: var(--muted); }
+
+/* Sticky start-download bar: .stream-files scrolls internally past a certain
+   length (max-height: 60vh above), so pinning this to the bottom of that
+   scroll area keeps it reachable without scrolling all the way down through
+   a large season pack's file list. The blurred backdrop keeps scrolled-past
+   file rows from showing through underneath it. */
+.download-start-bar {
+  position: sticky;
+  bottom: 0;
+  margin-top: 4px;
+  padding-top: 8px;
+  background: rgba(5, 5, 5, 0.88);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-top: 1px solid var(--hairline);
+}
 .player-links { padding-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
 .player-btn { white-space: nowrap; }
 
@@ -516,7 +534,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .toggle-row input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; flex: none; }
 /* The note explaining a toggle sits right under it; span is inline by default
    so a plain margin-top wouldn't apply — block it so the extra space shows. */
-.toggle-row + .source-note { display: block; margin-top: 10px; }
+.toggle-row + .source-note { display: block; margin-top: 4px; }
 .copied { color: var(--ok); font-size: 12px; }
 
 /* ---- Scroll-to-top (floating, bottom-right) ---- */

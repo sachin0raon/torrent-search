@@ -52,6 +52,12 @@ export default function DownloadPanel({ magnet }) {
     });
   }
 
+  function toggleSelectAll() {
+    setSelected((prev) =>
+      prev.size === torrent.files.length ? new Set() : new Set(torrent.files.map((f) => f.index)),
+    );
+  }
+
   async function startDownload() {
     if (!torrent || selected.size === 0) return;
     setStarting(true);
@@ -88,6 +94,21 @@ export default function DownloadPanel({ magnet }) {
             <div className="notice">Downloading — check the Downloads list for progress.</div>
           ) : (
             <>
+              {torrent.files.length > 1 ? (
+                <label className="stream-file-row download-file-row download-select-all">
+                  <input
+                    type="checkbox"
+                    checked={selected.size === torrent.files.length}
+                    ref={(el) => {
+                      if (el) el.indeterminate = selected.size > 0 && selected.size < torrent.files.length;
+                    }}
+                    onChange={toggleSelectAll}
+                  />
+                  <span className="fname">
+                    {selected.size === torrent.files.length ? 'Deselect all' : 'Select all'}
+                  </span>
+                </label>
+              ) : null}
               {torrent.files.map((f) => (
                 <label key={f.index} className="stream-file-row download-file-row">
                   <input
@@ -99,15 +120,20 @@ export default function DownloadPanel({ magnet }) {
                   <span className="notice">{formatSize(f.size)}</span>
                 </label>
               ))}
-              <button
-                className="btn-solid"
-                style={{ width: 'fit-content' }}
-                disabled={selected.size === 0 || starting}
-                onClick={startDownload}
-              >
-                <Download size={14} />
-                {starting ? 'Starting…' : `Download ${selected.size || ''} file${selected.size === 1 ? '' : 's'}`.trim()}
-              </button>
+              {/* Sticky, not just appended after the list: .stream-files scrolls
+                  internally (max-height: 60vh) for a large season pack, so a
+                  plain trailing button would sit below the fold, out of reach
+                  without scrolling all the way down first. */}
+              <div className="download-start-bar">
+                <button
+                  style={{ width: 'fit-content' }}
+                  disabled={selected.size === 0 || starting}
+                  onClick={startDownload}
+                >
+                  <Download size={14} />
+                  {starting ? 'Starting…' : `Download ${selected.size || ''} file${selected.size === 1 ? '' : 's'}`.trim()}
+                </button>
+              </div>
             </>
           )}
         </div>
