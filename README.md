@@ -81,6 +81,13 @@ Open http://localhost:5173.
 | `STREAM_METADATA_TIMEOUT` | `docker-compose.yml` / env | Seconds to wait for torrent metadata from DHT/peers before returning a timeout error (default `45`). |
 | `STREAM_TRACKERS_URLS` | `docker-compose.yml` / env | Comma-separated URLs of public tracker lists to fetch and add to every torrent. Empty/unset = use built-in defaults; `none` = disable tracker augmentation. |
 | `STREAM_TRACKERS_REFRESH` | `docker-compose.yml` / env | How often (seconds) to refresh the tracker lists (default `21600` = 6 h). |
+| `STREAM_ENGINE` | env | BitTorrent download engine: `anacrolix` (default, unchanged behavior) or `qbittorrent`. See [docs/STREAMING.md §5](docs/STREAMING.md) for the qBittorrent-engine design. |
+| `STREAM_QBIT_HOST` | env | Base URL of a running qBittorrent Web UI (e.g. `http://localhost:8080`). Empty disables qBittorrent entirely on the default (`anacrolix`) engine; **required** when `STREAM_ENGINE=qbittorrent`. |
+| `STREAM_QBIT_USER` / `STREAM_QBIT_PASS` | env | qBittorrent Web UI credentials (default `admin` / `adminadmin`). |
+| `STREAM_QBIT_REMOTE_ROOT` | env | Save-path root as qBittorrent itself sees it (e.g. `/data/downloads`). **Required** when `STREAM_ENGINE=qbittorrent`. |
+| `STREAM_QBIT_DOWNLOAD_DIR` | env | Local filesystem root the streamer container sees for that same directory (the bind-mount target). **Required** when `STREAM_ENGINE=qbittorrent`; validated at startup. |
+| `STREAM_QBIT_CATEGORY` | env | qBittorrent category tag applied to torrents the qbittorrent engine adds (default `tsa-stream-engine`); purged on every startup for a clean slate. |
+| `STREAM_QBIT_POLL_INTERVAL` | env | Seconds between metadata-readiness and piece-state polls when using the qbittorrent engine (default `1`). |
 
 ## Run with Docker
 

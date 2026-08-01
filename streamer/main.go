@@ -16,23 +16,53 @@ import (
 	"github.com/sachin0raon/tsa/streamer/internal/stream"
 )
 
+// buildClient selects the download engine per cfg.Engine. Extracted from main()
+// so the safety invariant in docs/STREAMING.md §5 Decision #12 — QBitPeerSource
+// must never be wired up when the qbittorrent engine is the one actually
+// running — is unit-testable: main() itself can't be exercised directly.
+//
+// The two uses of qBittorrent (peer-accelerator for anacrolix vs. real engine)
+// are mutually exclusive: this function returns a non-nil *QBitPeerSource only
+// on the anacrolix branch, never on the qbittorrent branch, regardless of
+// whether cfg.QBitHost is also set.
+func buildClient(cfg stream.Config) (stream.TorrentClient, *stream.QBitPeerSource, error) {
+	if cfg.Engine == "qbittorrent" {
+		client, err := stream.NewQBitClient(cfg.QBitHost, cfg.QBitUser, cfg.QBitPass,
+			cfg.QBitRemoteRoot, cfg.QBitDownloadDir, cfg.QBitCategory, cfg.QBitPollInterval, cfg.IdleTimeout)
+		if err != nil {
+			return nil, nil, err
+		}
+		return client, nil, nil
+	}
+
+	client, err := stream.NewAnacrolixClient(cfg.DownloadDir, cfg.TorrentPort, cfg.DHTStateFile)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var qbit *stream.QBitPeerSource
+	if cfg.QBitHost != "" {
+		qbit, err = stream.NewQBitPeerSource(cfg.QBitHost, cfg.QBitUser, cfg.QBitPass, cfg.QBitCategory)
+		if err != nil {
+			log.Printf("streamer: qbit peer source unavailable: %v (peer injection disabled)", err)
+			qbit = nil
+		}
+	}
+	return client, qbit, nil
+}
+
 func main() {
 	cfg := stream.LoadConfig()
 
-	client, err := stream.NewAnacrolixClient(cfg.DownloadDir, cfg.TorrentPort, cfg.DHTStateFile)
+	client, qbit, err := buildClient(cfg)
 	if err != nil {
 		log.Fatalf("streamer: failed to start torrent client: %v", err)
 	}
 
 	mgr := stream.NewManager(cfg, client)
 
-	if cfg.QBitHost != "" {
-		qbit, err := stream.NewQBitPeerSource(cfg.QBitHost, cfg.QBitUser, cfg.QBitPass)
-		if err != nil {
-			log.Printf("streamer: qbit peer source unavailable: %v (peer injection disabled)", err)
-		} else {
-			mgr.SetQBitPeerSource(qbit)
-		}
+	if qbit != nil {
+		mgr.SetQBitPeerSource(qbit)
 	}
 
 	if err := mgr.WipeDownloadDir(); err != nil {

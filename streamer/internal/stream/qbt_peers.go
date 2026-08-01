@@ -27,11 +27,23 @@ const qbtMaxDuration = 2 * time.Minute
 // soon as anacrolix receives metadata or the max duration elapses.
 type QBitPeerSource struct {
 	client *qbt.Client
+	// engineCategory is the qBittorrent-engine's category tag (see qbt_client.go).
+	// It's only ever non-empty as a defensive guard: this source is wired up only
+	// when STREAM_ENGINE=anacrolix, so it should never encounter a torrent tagged
+	// with this category — but if two overlapping processes (e.g. an outgoing
+	// anacrolix container and an incoming qbittorrent-engine container during a
+	// redeploy) end up pointed at the same qBittorrent instance, this stops the
+	// peer-accelerator's cleanup from deleting the real engine's live data
+	// (docs/STREAMING.md §5 Decision #12).
+	engineCategory string
 }
 
 // NewQBitPeerSource creates a QBitPeerSource, connects to the running
 // qBittorrent instance, and logs in. Returns an error if login fails.
-func NewQBitPeerSource(host, user, pass string) (*QBitPeerSource, error) {
+// engineCategory is the qbittorrent-engine's category tag (may be empty if that
+// engine is never used against this qBittorrent instance) — see the
+// cross-process safety note on QBitPeerSource above.
+func NewQBitPeerSource(host, user, pass, engineCategory string) (*QBitPeerSource, error) {
 	c := qbt.NewClient(qbt.Config{
 		Host:     host,
 		Username: user,
@@ -42,7 +54,7 @@ func NewQBitPeerSource(host, user, pass string) (*QBitPeerSource, error) {
 		return nil, err
 	}
 	log.Printf("streamer: qbit peer source connected to %s", host)
-	return &QBitPeerSource{client: c}, nil
+	return &QBitPeerSource{client: c, engineCategory: engineCategory}, nil
 }
 
 // InjectPeers adds the magnet to qBittorrent, polls for peers on a ticker,
@@ -67,9 +79,13 @@ func (q *QBitPeerSource) InjectPeers(magnet, infohash string, gotInfo <-chan str
 		return
 	}
 	defer func() {
-		// Delete torrent and any downloaded data when we are done probing.
 		dCtx, dCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer dCancel()
+		if q.ownedByEngine(dCtx, infohash) {
+			log.Printf("streamer: qbit probe %.8s belongs to the qbittorrent engine (category %q) — skipping delete", infohash, q.engineCategory)
+			return
+		}
+		// Delete torrent and any downloaded data when we are done probing.
 		if err := q.client.DeleteTorrentsCtx(dCtx, []string{infohash}, true); err != nil {
 			log.Printf("streamer: qbit delete probe %.8s: %v", infohash, err)
 		}
@@ -91,6 +107,24 @@ func (q *QBitPeerSource) InjectPeers(magnet, infohash string, gotInfo <-chan str
 			q.pollAndInject(ctx, infohash, adder)
 		}
 	}
+}
+
+// ownedByEngine reports whether infohash currently belongs to the qbittorrent
+// engine's category — see the cross-process safety note on QBitPeerSource. A
+// lookup failure is treated conservatively as "not owned" (proceeds with the
+// normal probe-delete path) since engineCategory is expected to be empty for
+// the overwhelming majority of deployments (this source only runs when
+// STREAM_ENGINE=anacrolix) and failing safe here would risk leaking probe
+// torrents on every transient API error.
+func (q *QBitPeerSource) ownedByEngine(ctx context.Context, infohash string) bool {
+	if q.engineCategory == "" {
+		return false
+	}
+	torrents, err := q.client.GetTorrentsCtx(ctx, qbt.TorrentFilterOptions{Hashes: []string{infohash}})
+	if err != nil || len(torrents) == 0 {
+		return false
+	}
+	return torrents[0].Category == q.engineCategory
 }
 
 func (q *QBitPeerSource) pollAndInject(ctx context.Context, infohash string, adder func([]net.UDPAddr)) {

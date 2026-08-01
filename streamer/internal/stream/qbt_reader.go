@@ -1,0 +1,176 @@
+package stream
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"time"
+
+	qbt "github.com/autobrr/go-qbittorrent"
+)
+
+// ErrLocalFileMissing is returned when qBittorrent reports a piece as fully
+// downloaded but the corresponding local file still can't be opened — a
+// path-mapping misconfiguration (Decision #20 in docs/STREAMING.md §5), not a
+// timing issue, so it's surfaced immediately rather than retried forever. The
+// "file doesn't exist yet" case (recoverable) is handled separately: Read never
+// reaches the point of opening the file until the relevant piece is confirmed
+// downloaded.
+var ErrLocalFileMissing = errors.New("qbt: piece reported downloaded but local file is missing (check STREAM_QBIT_REMOTE_ROOT / STREAM_QBIT_DOWNLOAD_DIR)")
+
+// qbtReader is the piece-aware Reader for the qBittorrent engine: it reads
+// directly off disk from qBittorrent's download directory, blocking until the
+// piece covering the current read position is confirmed downloaded (§5.8).
+type qbtReader struct {
+	hash       string
+	index      int
+	fileOffset int64 // this file's byte offset within the whole torrent
+	size       int64
+	pieceSize  int64
+	pos        int64
+
+	localPath string
+	pathErr   error // set at construction if path-mapping failed
+
+	api          qbtAPI
+	pollInterval time.Duration
+	torrent      *qbtTorrent
+
+	f      *os.File
+	closed bool
+
+	// confirmedPiece caches the last piece index observed as fully downloaded.
+	// A piece never transitions back to not-downloaded, so once confirmed it
+	// can be trusted indefinitely — this avoids a network round-trip to
+	// GetTorrentPieceStatesCtx on every single Read() call. Reads normally stay
+	// within the same piece for many consecutive calls (piece size is typically
+	// far larger than an HTTP chunk-read size), so this eliminates the vast
+	// majority of otherwise-redundant polling once a region is downloaded.
+	confirmedPiece int // -1 = none yet
+}
+
+// SetReadahead is a no-op: sequential-download + first/last-piece-priority (set
+// at add-time) already drives qBittorrent's own prefetch; there's no per-read
+// lever to pull here the way anacrolix's reader has.
+func (r *qbtReader) SetReadahead(int64) {}
+
+func (r *qbtReader) Read(p []byte) (int, error) {
+	if r.pathErr != nil {
+		return 0, r.pathErr
+	}
+	if r.pos >= r.size {
+		return 0, io.EOF
+	}
+	if r.pieceSize <= 0 {
+		return 0, fmt.Errorf("qbt: unknown piece size for hash=%.8s", r.hash)
+	}
+
+	globalOffset := r.fileOffset + r.pos
+	pieceIndex := int(globalOffset / r.pieceSize)
+	pieceEndLocal := int64(pieceIndex+1)*r.pieceSize - r.fileOffset
+
+	// Clamp so the returned slice never crosses into an unconfirmed piece —
+	// this is what guarantees no zero-filled preallocated bytes are ever served
+	// as real data.
+	n := int64(len(p))
+	if rem := r.size - r.pos; rem < n {
+		n = rem
+	}
+	if rem := pieceEndLocal - r.pos; rem < n {
+		n = rem
+	}
+	if n <= 0 {
+		n = 1
+	}
+
+	if pieceIndex != r.confirmedPiece {
+		for {
+			ready, err := r.pieceReady(pieceIndex)
+			if err != nil {
+				// Transient API error — keep polling rather than failing the
+				// read, consistent with the metadata poller's precedent
+				// (Decision #15).
+				time.Sleep(r.pollInterval)
+				continue
+			}
+			if ready {
+				break
+			}
+			time.Sleep(r.pollInterval)
+		}
+		r.confirmedPiece = pieceIndex
+	}
+
+	if r.f == nil {
+		f, err := os.Open(r.localPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// The piece is already confirmed downloaded (the loop above only
+				// breaks once it is), so a missing file here is unrecoverable.
+				return 0, ErrLocalFileMissing
+			}
+			return 0, err
+		}
+		r.f = f
+	}
+
+	got, err := r.f.ReadAt(p[:n], r.pos)
+	r.pos += int64(got)
+	if err != nil && err != io.EOF {
+		return got, err
+	}
+	return got, nil
+}
+
+// pieceReady reports whether pieceIndex is fully downloaded. It fetches the full
+// piece-state array on every call — qBittorrent exposes no per-piece endpoint.
+func (r *qbtReader) pieceReady(pieceIndex int) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+	states, err := r.api.GetTorrentPieceStatesCtx(ctx, r.hash)
+	if err != nil {
+		return false, err
+	}
+	// Bounds safety (Decision #13): qBittorrent can report metadata as ready
+	// before its piece-map is fully populated — never index out of range.
+	if pieceIndex < 0 || pieceIndex >= len(states) {
+		return false, nil
+	}
+	return states[pieceIndex] == qbt.PieceStateAlreadyDownloaded, nil
+}
+
+func (r *qbtReader) Seek(offset int64, whence int) (int64, error) {
+	var newPos int64
+	switch whence {
+	case io.SeekStart:
+		newPos = offset
+	case io.SeekCurrent:
+		newPos = r.pos + offset
+	case io.SeekEnd:
+		newPos = r.size + offset
+	default:
+		return 0, fmt.Errorf("qbt: invalid whence %d", whence)
+	}
+	if newPos < 0 {
+		return 0, fmt.Errorf("qbt: negative seek position %d", newPos)
+	}
+	r.pos = newPos
+	return r.pos, nil
+}
+
+func (r *qbtReader) Close() error {
+	if r.closed {
+		return nil
+	}
+	r.closed = true
+	var err error
+	if r.f != nil {
+		err = r.f.Close()
+	}
+	if r.torrent != nil {
+		r.torrent.releaseReader(r.index)
+	}
+	return err
+}

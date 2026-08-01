@@ -41,11 +41,29 @@ type Config struct {
 	DHTStateFile string
 	// QBitHost is the base URL of a running qBittorrent Web UI
 	// (e.g. "http://localhost:8080"). Empty string disables qBittorrent peer
-	// injection entirely.
+	// injection entirely (anacrolix engine) or is required (qbittorrent engine).
 	QBitHost string
 	// QBitUser and QBitPass are the Web UI credentials (default: admin / adminadmin).
 	QBitUser string
 	QBitPass string
+
+	// Engine selects the BitTorrent download engine: "anacrolix" (default) or
+	// "qbittorrent". Anything else falls back to "anacrolix".
+	Engine string
+	// QBitRemoteRoot is qBittorrent's save-path root as qBittorrent itself sees it
+	// (e.g. "/data/downloads"). Required when Engine is "qbittorrent".
+	QBitRemoteRoot string
+	// QBitDownloadDir is the local filesystem root the streamer container sees for
+	// that same directory (the bind-mount target). Required when Engine is
+	// "qbittorrent".
+	QBitDownloadDir string
+	// QBitCategory tags torrents the qbittorrent engine adds, so a restart can
+	// purge orphans from a prior crash without touching unrelated torrents in a
+	// shared qBittorrent instance.
+	QBitCategory string
+	// QBitPollInterval is how often the qbittorrent engine polls for
+	// metadata-readiness and piece-state.
+	QBitPollInterval time.Duration
 }
 
 // LoadConfig reads configuration from the environment, applying defaults for
@@ -61,11 +79,17 @@ func LoadConfig() Config {
 		TrackersURLs:    trackerURLs(),
 		TrackersRefresh: envSeconds("STREAM_TRACKERS_REFRESH", 21600), // 6h
 		TrackersTimeout: envSeconds("STREAM_TRACKERS_TIMEOUT", 15),
-		TorrentPort:  envInt("STREAM_TORRENT_PORT", 6881),
-		DHTStateFile: envStr("STREAM_DHT_STATE_FILE", "/data/dht-state.json"),
-		QBitHost:     envStr("STREAM_QBIT_HOST", ""),
-		QBitUser:     envStr("STREAM_QBIT_USER", "admin"),
-		QBitPass:     envStr("STREAM_QBIT_PASS", "adminadmin"),
+		TorrentPort:     envInt("STREAM_TORRENT_PORT", 6881),
+		DHTStateFile:    envStr("STREAM_DHT_STATE_FILE", "/data/dht-state.json"),
+		QBitHost:        envStr("STREAM_QBIT_HOST", ""),
+		QBitUser:        envStr("STREAM_QBIT_USER", "admin"),
+		QBitPass:        envStr("STREAM_QBIT_PASS", "adminadmin"),
+
+		Engine:           envStr("STREAM_ENGINE", "anacrolix"),
+		QBitRemoteRoot:   envStr("STREAM_QBIT_REMOTE_ROOT", ""),
+		QBitDownloadDir:  envStr("STREAM_QBIT_DOWNLOAD_DIR", ""),
+		QBitCategory:     envStr("STREAM_QBIT_CATEGORY", "tsa-stream-engine"),
+		QBitPollInterval: envSeconds("STREAM_QBIT_POLL_INTERVAL", 1),
 	}
 }
 
