@@ -29,11 +29,11 @@ describe('DownloadPanel', () => {
     expect(await screen.findByText('S01E01.mkv')).toBeInTheDocument();
     expect(screen.getByText('S01E02.mkv')).toBeInTheDocument();
 
-    // Nothing selected yet — the start button is disabled.
-    const startButton = screen.getByRole('button', { name: /download/i });
-    expect(startButton).toBeDisabled();
+    // Nothing selected yet — the floating download button doesn't exist at all.
+    expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByText('S01E01.mkv'));
+    const startButton = await screen.findByRole('button', { name: /download/i });
     expect(startButton).not.toBeDisabled();
 
     await userEvent.click(startButton);

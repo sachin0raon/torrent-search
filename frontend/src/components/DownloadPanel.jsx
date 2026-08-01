@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { RefreshCw, Download } from 'lucide-react';
 import { downloader } from '../api/downloader.js';
 import ErrorBanner from './ErrorBanner.jsx';
@@ -120,24 +121,34 @@ export default function DownloadPanel({ magnet }) {
                   <span className="notice">{formatSize(f.size)}</span>
                 </label>
               ))}
-              {/* Sticky, not just appended after the list: .stream-files scrolls
-                  internally (max-height: 60vh) for a large season pack, so a
-                  plain trailing button would sit below the fold, out of reach
-                  without scrolling all the way down first. */}
-              <div className="download-start-bar">
-                <button
-                  style={{ width: 'fit-content' }}
-                  disabled={selected.size === 0 || starting}
-                  onClick={startDownload}
-                >
-                  <Download size={14} />
-                  {starting ? 'Starting…' : `Download ${selected.size || ''} file${selected.size === 1 ? '' : 's'}`.trim()}
-                </button>
-              </div>
             </>
           )}
         </div>
       ) : null}
+      {/* Floating rather than an inline/sticky row: it lives outside
+          .stream-files' scrollable area entirely, so unlike the old
+          sticky start bar it never overlaps or needs to mask scrolled-past
+          file rows. Shows only once something's selected, and disappears
+          again once the download request lands (started -> true hides the
+          whole selection UI above, this included). */}
+      <AnimatePresence>
+        {torrent && !started && selected.size > 0 ? (
+          <motion.button
+            key="download-fab"
+            className="download-fab"
+            onClick={startDownload}
+            disabled={starting}
+            aria-label={`Download ${selected.size} file${selected.size === 1 ? '' : 's'}`}
+            initial={{ opacity: 0, scale: 0.8, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: 10 }}
+            transition={{ duration: 0.2 }}
+          >
+            {starting ? <RefreshCw size={16} style={{ animation: 'spin 0.7s linear infinite' }} /> : <Download size={16} />}
+            {selected.size}
+          </motion.button>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }

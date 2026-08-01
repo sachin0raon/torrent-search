@@ -465,7 +465,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .forum-link-row .actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 
 /* ---- Inline stream panel ---- */
-.stream-panel { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--hairline); }
+.stream-panel { position: relative; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--hairline); }
 .stream-panel .stream-files { margin-top: 0; }
 
 /* ---- Stream modal file list ---- */
@@ -480,24 +480,34 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .download-select-all { border: none; padding: 2px 12px 8px; font-weight: 600; }
 .download-select-all .fname { flex: none; font-size: 12px; color: var(--muted); }
 
-/* Sticky start-download bar: .stream-files scrolls internally past a certain
-   length (max-height: 60vh above), so pinning this to the bottom of that
-   scroll area keeps it reachable without scrolling all the way down through
-   a large season pack's file list. Going fully transparent here (a prior fix
-   for this looking like a flat black slab on short, non-scrolling lists)
-   overcorrected: scrolled-past file rows then showed straight through and
-   overlapped the button. A top-to-bottom fade to the page's own --bg (not an
-   arbitrary color, so it blends with the rest of this border-only panel
-   instead of reading as a hard box) masks that scrolled text while staying
-   invisible when the list is short enough that nothing scrolls underneath. */
-.download-start-bar {
-  position: sticky;
-  bottom: 0;
-  margin-top: 4px;
-  padding-top: 20px;
-  border-top: 1px solid var(--hairline);
-  background: linear-gradient(to bottom, transparent, var(--bg) 65%);
+/* Floating download-start button: sits outside .stream-files' own scrollable
+   area (a sibling in the DOM, absolutely positioned over .stream-panel), so
+   unlike the old sticky in-list bar it never sits in front of scrolled
+   content and never needs a backdrop to mask it — a small floating pill
+   overlapping a corner of the list is an expected FAB pattern, not a hard
+   box. Only rendered once a file is selected (DownloadPanel.jsx). Matches
+   the app's existing floating-button language (.scroll-top-btn/.stats-fab):
+   dark blurred glass, not the bright primary-CTA gradient — this is an
+   overlay control, not a page-level call to action. */
+.download-fab {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  height: 46px;
+  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  background: rgba(12, 12, 14, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--hairline);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--inset-hi), 0 10px 30px rgba(0, 0, 0, 0.45);
 }
+.download-fab:hover { color: #fff; background: rgba(20, 20, 24, 0.85); }
 .player-links { padding-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
 .player-btn { white-space: nowrap; }
 
