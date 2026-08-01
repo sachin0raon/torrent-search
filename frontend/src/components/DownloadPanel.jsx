@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { RefreshCw, Download } from 'lucide-react';
 import { downloader } from '../api/downloader.js';
@@ -125,32 +126,36 @@ export default function DownloadPanel({ magnet }) {
           )}
         </div>
       ) : null}
-      {/* Fixed to the viewport's bottom-right corner (styles.css), like the
-          app's other floating buttons — not confined to this row's own
-          box, and outside .stream-files' scrollable area entirely, so
-          unlike the old sticky start bar it never overlaps or needs to
-          mask scrolled-past file rows. Shows only once something's
-          selected, and disappears again once the download request lands
-          (started -> true hides the whole selection UI above, this
-          included). */}
-      <AnimatePresence>
-        {torrent && !started && selected.size > 0 ? (
-          <motion.button
-            key="download-fab"
-            className="download-fab"
-            onClick={startDownload}
-            disabled={starting}
-            aria-label={`Download ${selected.size} file${selected.size === 1 ? '' : 's'}`}
-            initial={{ opacity: 0, scale: 0.8, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.8, y: 10 }}
-            transition={{ duration: 0.2 }}
-          >
-            {starting ? <RefreshCw size={16} style={{ animation: 'spin 0.7s linear infinite' }} /> : <Download size={16} />}
-            {selected.size}
-          </motion.button>
-        ) : null}
-      </AnimatePresence>
+      {/* Portaled straight to <body>: this row's ancestor (.result-row) is a
+          motion.div with whileHover={{ y: -2 }}, and any element with a CSS
+          transform becomes the containing block for its position:fixed
+          descendants — so without the portal this button would anchor to
+          that row's box instead of the actual viewport corner. Stacked
+          above .scroll-top-btn (styles.css), like the app's other floating
+          buttons. Shows only once something's selected, and disappears
+          again once the download request lands (started -> true hides the
+          whole selection UI above, this included). */}
+      {createPortal(
+        <AnimatePresence>
+          {torrent && !started && selected.size > 0 ? (
+            <motion.button
+              key="download-fab"
+              className="download-fab"
+              onClick={startDownload}
+              disabled={starting}
+              aria-label={`Download ${selected.size} file${selected.size === 1 ? '' : 's'}`}
+              initial={{ opacity: 0, scale: 0.8, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 10 }}
+              transition={{ duration: 0.2 }}
+            >
+              {starting ? <RefreshCw size={16} style={{ animation: 'spin 0.7s linear infinite' }} /> : <Download size={16} />}
+              {selected.size}
+            </motion.button>
+          ) : null}
+        </AnimatePresence>,
+        document.body,
+      )}
     </div>
   );
 }

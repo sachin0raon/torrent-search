@@ -481,18 +481,19 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .download-select-all .fname { flex: none; font-size: 12px; color: var(--muted); }
 
 /* Floating download-start button: fixed to the viewport's bottom-right
-   corner (same corner/size as .scroll-top-btn, offset to its left so the
-   two never overlap once both are visible), not confined to the local
+   corner, stacked directly above .scroll-top-btn (same right offset, bottom
+   pushed up by that button's own height + a gap) rather than beside it.
+   Portaled to <body> in DownloadPanel.jsx — not confined to the local
    .stream-panel box — it needs to read as a real page-level floating
    action button, the same family as .scroll-top-btn/.stats-fab, not a
    control pinned to wherever its result row happens to scroll to. Sitting
-   outside .stream-files' own scrollable area (a DOM sibling) also means it
-   never sits in front of scrolled content and never needs a backdrop to
-   mask it. Only rendered once a file is selected (DownloadPanel.jsx). */
+   outside .stream-files' own scrollable area also means it never sits in
+   front of scrolled content and never needs a backdrop to mask it. Only
+   rendered once a file is selected (DownloadPanel.jsx). */
 .download-fab {
   position: fixed;
-  right: 82px;
-  bottom: 24px;
+  right: 24px;
+  bottom: 82px;
   z-index: 46;
   height: 46px;
   padding: 0 18px;
@@ -676,7 +677,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   .player-btn { font-size: 13px; padding: 8px 14px; }
 
   .scroll-top-btn { bottom: 16px; right: 16px; }
-  .download-fab { bottom: 16px; right: 70px; }
+  .download-fab { bottom: 72px; right: 16px; }
 
   /* Source tabs: 4 tabs no longer fit on one line on narrow screens —
      wrap into a 2-column grid instead of forcing horizontal scroll. */
