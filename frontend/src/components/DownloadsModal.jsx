@@ -59,6 +59,7 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete, onRefresh }) 
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const confirmTimerRef = useRef(null);
   const [pausing, setPausing] = useState(false);
   const [resuming, setResuming] = useState(false);
   const pct = Math.round((progress ?? 0) * 100);
@@ -119,11 +120,15 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete, onRefresh }) 
     }
   }
 
+  useEffect(() => () => clearTimeout(confirmTimerRef.current), []);
+
   async function handleDelete() {
     if (!confirmDelete) {
       setConfirmDelete(true);
+      confirmTimerRef.current = setTimeout(() => setConfirmDelete(false), 3000);
       return;
     }
+    clearTimeout(confirmTimerRef.current);
     setDeleting(true);
     try {
       await onDelete(hash);
