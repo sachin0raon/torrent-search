@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { RefreshCw, Download } from 'lucide-react';
 import { downloader } from '../api/downloader.js';
 import ErrorBanner from './ErrorBanner.jsx';
+import Toast from './Toast.jsx';
 import { formatSize } from '../formatSize.js';
 import { baseName } from '../playerLinks.js';
 
@@ -19,14 +20,19 @@ export default function DownloadPanel({ magnet }) {
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [starting, setStarting] = useState(false);
-  const [started, setStarted] = useState(false);
+  const [toastMsg, setToastMsg] = useState('');
+
+  useEffect(() => {
+    if (!toastMsg) return undefined;
+    const t = setTimeout(() => setToastMsg(''), 4000);
+    return () => clearTimeout(t);
+  }, [toastMsg]);
 
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
     setLoading(true);
     setError('');
-    setStarted(false);
     downloader
       .createDownload(magnet, controller.signal)
       .then((t) => {
@@ -66,7 +72,8 @@ export default function DownloadPanel({ magnet }) {
     setError('');
     try {
       await downloader.selectFiles(torrent.hash, Array.from(selected));
-      setStarted(true);
+      setSelected(new Set());
+      setToastMsg('Downloading — check the Downloads list for progress.');
     } catch (e) {
       setError(e.message || 'Failed to start download');
     } finally {
@@ -76,6 +83,10 @@ export default function DownloadPanel({ magnet }) {
 
   return (
     <div className="stream-panel">
+      {createPortal(
+        <Toast variant="info" message={toastMsg} onDismiss={() => setToastMsg('')} />,
+        document.body,
+      )}
       {loading ? <div className="spinner">Fetching torrent info…</div> : null}
       {!loading ? (
         <div className="stream-files">
@@ -92,8 +103,6 @@ export default function DownloadPanel({ magnet }) {
             </button>
           ) : torrent.files.length === 0 ? (
             <div className="empty">No files in this torrent.</div>
-          ) : started ? (
-            <div className="notice">Downloading — check the Downloads list for progress.</div>
           ) : (
             <>
               {torrent.files.length > 1 ? (
@@ -130,14 +139,10 @@ export default function DownloadPanel({ magnet }) {
           motion.div with whileHover={{ y: -2 }}, and any element with a CSS
           transform becomes the containing block for its position:fixed
           descendants — so without the portal this button would anchor to
-          that row's box instead of the actual viewport corner. Stacked
-          above .scroll-top-btn (styles.css), like the app's other floating
-          buttons. Shows only once something's selected, and disappears
-          again once the download request lands (started -> true hides the
-          whole selection UI above, this included). */}
+          that row's box instead of the actual viewport corner. */}
       {createPortal(
         <AnimatePresence>
-          {torrent && !started && selected.size > 0 ? (
+          {torrent && selected.size > 0 ? (
             <motion.button
               key="download-fab"
               className="download-fab"

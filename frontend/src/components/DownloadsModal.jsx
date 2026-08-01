@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, ChevronDown, ChevronUp, Trash2, PlayCircle, Download, Pause, Play, RefreshCw } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Trash2, PlayCircle, Download, Pause, Play } from 'lucide-react';
 import { downloader } from '../api/downloader.js';
 import { buildDownloadUrl, playerLinks, baseName } from '../playerLinks.js';
 import { fadeUp, spring, collapsePanel } from '../motion.js';
@@ -60,8 +60,6 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete, onRefresh }) 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const confirmTimerRef = useRef(null);
-  const [pausing, setPausing] = useState(false);
-  const [resuming, setResuming] = useState(false);
   const pct = Math.round((progress ?? 0) * 100);
   const isDone = pct >= 100;
   const isPaused = state === 'pausedDL' || state === 'stoppedDL';
@@ -101,23 +99,13 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete, onRefresh }) 
   }
 
   async function handlePause() {
-    setPausing(true);
-    try {
-      await downloader.pauseDownload(hash);
-      await onRefresh();
-    } finally {
-      setPausing(false);
-    }
+    await downloader.pauseDownload(hash);
+    await onRefresh();
   }
 
   async function handleResume() {
-    setResuming(true);
-    try {
-      await downloader.resumeDownload(hash);
-      await onRefresh();
-    } finally {
-      setResuming(false);
-    }
+    await downloader.resumeDownload(hash);
+    await onRefresh();
   }
 
   useEffect(() => () => clearTimeout(confirmTimerRef.current), []);
@@ -153,13 +141,13 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete, onRefresh }) 
       <div className="stats-card-actions">
         {!isDone && (
           isPaused ? (
-            <button onClick={handleResume} disabled={resuming}>
-              {resuming ? <RefreshCw size={14} style={{ animation: 'spin 0.7s linear infinite' }} /> : <Play size={14} />}
+            <button onClick={handleResume}>
+              <Play size={14} />
               Resume
             </button>
           ) : (
-            <button onClick={handlePause} disabled={pausing}>
-              {pausing ? <RefreshCw size={14} style={{ animation: 'spin 0.7s linear infinite' }} /> : <Pause size={14} />}
+            <button onClick={handlePause}>
+              <Pause size={14} />
               Pause
             </button>
           )

@@ -46,7 +46,7 @@ function ForumLinkRow({ link }) {
                   {downloadOpen ? 'Hide download' : 'Download'}
                 </button>
               ) : null}
-              <CopyButton value={link.magnet} className="" />
+              <CopyButton value={link.magnet} className="action-copy" />
             </>
           ) : (
             <span className="notice">no magnet</span>

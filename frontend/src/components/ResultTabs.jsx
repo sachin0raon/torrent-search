@@ -105,7 +105,7 @@ function TorrentRow({ item }) {
               {downloadOpen ? 'Hide download' : 'Download'}
             </button>
           ) : null}
-          <CopyButton value={item.magnet} className="" />
+          <CopyButton value={item.magnet} className="action-copy" />
         </div>
       </div>
       <AnimatePresence initial={false}>
