@@ -483,17 +483,20 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 /* Sticky start-download bar: .stream-files scrolls internally past a certain
    length (max-height: 60vh above), so pinning this to the bottom of that
    scroll area keeps it reachable without scrolling all the way down through
-   a large season pack's file list. Every other row in this panel is
-   border-only with no background fill (see .stream-file-row above) — this
-   stayed transparent too rather than painting an opaque backdrop, which
-   used to render as a flat black slab behind the button even on short,
-   non-scrolling file lists. */
+   a large season pack's file list. Going fully transparent here (a prior fix
+   for this looking like a flat black slab on short, non-scrolling lists)
+   overcorrected: scrolled-past file rows then showed straight through and
+   overlapped the button. A top-to-bottom fade to the page's own --bg (not an
+   arbitrary color, so it blends with the rest of this border-only panel
+   instead of reading as a hard box) masks that scrolled text while staying
+   invisible when the list is short enough that nothing scrolls underneath. */
 .download-start-bar {
   position: sticky;
   bottom: 0;
   margin-top: 4px;
-  padding-top: 8px;
+  padding-top: 20px;
   border-top: 1px solid var(--hairline);
+  background: linear-gradient(to bottom, transparent, var(--bg) 65%);
 }
 .player-links { padding-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
 .player-btn { white-space: nowrap; }
@@ -642,6 +645,11 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   .forum-link-row { flex-wrap: wrap; }
   .forum-link-row .fname { flex-basis: 100%; }
   .forum-link-row .actions { margin-left: 0; flex-wrap: wrap; }
+
+  /* "Copy magnet" was still wide enough post-wrap to push past its
+     container's edge — drop the label and keep just the icon here. */
+  .result-row .actions .btn-label,
+  .forum-link-row .actions .btn-label { display: none; }
 
   /* Downloads modal cards: Show files / Delete can overflow once "Delete"
      becomes the longer "Confirm delete?" label after the first tap. */

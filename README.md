@@ -90,6 +90,7 @@ Open http://localhost:5173.
 | `STREAM_QBIT_CATEGORY` | env | qBittorrent category tag applied to torrents the **streaming** qbittorrent engine adds (default `tsa-stream-engine`); purged on every startup for a clean slate. |
 | `STREAM_QBIT_POLL_INTERVAL` | env | Seconds between metadata-readiness and piece-state polls; shared by both the streaming and download engines (default `1`). |
 | `DOWNLOAD_QBIT_CATEGORY` | env | qBittorrent category tag applied to torrents the **download-manager** feature adds (default `tsa-download`). **Never** purged on startup — downloads are intentionally persistent. See [docs/STREAMING.md §6](docs/STREAMING.md). |
+| `DOWNLOAD_UNSELECTED_TIMEOUT` | env | Seconds a download-manager torrent may sit with **no file ever selected** (e.g. opened the file picker, never picked anything) before it's automatically removed from qBittorrent (default `900` = 15 min). A torrent with at least one selected file is never touched by this, regardless of age. See [docs/STREAMING.md §6](docs/STREAMING.md). |
 
 ## Run with Docker
 

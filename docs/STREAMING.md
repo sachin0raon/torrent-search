@@ -695,10 +695,13 @@ qbittorrent-engine container are both live against the same qBittorrent instance
 > behind a separate opt-in env var.
 >
 > Designed via structured brainstorming (Understanding Lock confirmed,
-> incremental design review, running Decision Log) — decisions #22–25.
-> §§6.5–6.7 describe the implementation as actually shipped, including two
-> corrections found during implementation (§6.7's frontend architecture
-> assumption, §6.6's `OpenFile`/`Get` error-handling fix) and one pre-existing,
+> incremental design review, running Decision Log) — decisions #22–26 (#26
+> added post-ship, §6.5.1). §§6.5–6.7 describe the implementation as
+> actually shipped, including several corrections found after the initial
+> build: §6.7's frontend architecture assumption, §6.6's `OpenFile`/`Get`
+> error-handling fix, a round of UI polish (select-all, button styling, a
+> sticky start-download bar, live per-file progress while a card is
+> expanded, mobile action-row wrapping — all in §6.7), and one pre-existing,
 > unrelated test failure noted at the end of §6.9.
 
 ### 6.1 Understanding Summary
@@ -769,6 +772,7 @@ qbittorrent-engine container are both live against the same qBittorrent instance
 | 23 | Download gets its **own** byte-serving endpoint (`GET /download-api/stream/{hash}/{index}/{filename}`), not a reuse of the existing `/stream/{id}/{index}/{filename}` | Reuse `/stream/` for both Play and Download (the original plan) | Avoids coupling `Manager`'s session-id-keyed lookup to a second id scheme (raw qBittorrent hash); keeps `DownloadManager` self-contained so a future change to Stream's session model can't break Download serving or vice versa |
 | 24 | `QBitPeerSource`'s delete-probe cleanup (§5's Decision #12) is generalized from checking one protected category to checking a **set** — `{STREAM_QBIT_CATEGORY, DOWNLOAD_QBIT_CATEGORY}` (whichever are configured) | Leave the guard checking only `STREAM_QBIT_CATEGORY` | Without this, `QBitPeerSource` (which only runs when `STREAM_ENGINE=anacrolix`) could delete a user's in-progress *download* the same way Decision #12 stopped it from deleting a real *stream* — same bug class, new blast radius, in the common `anacrolix` + `DOWNLOAD_ENGINE=qbittorrent` configuration |
 | 25 | `STREAM_ENGINE=qbittorrent` + `DOWNLOAD_ENGINE=qbittorrent` is an **invalid config pair**, checked in `config.go`'s validation (before any qBittorrent login) and hard-failing (`log.Fatalf`) | Allow both (two separate clients against the same account); allow with just a startup warning | Nothing in the design needs both engines pointed at qBittorrent from the same process; the two real combinations are `anacrolix`+download or `qbittorrent`-stream-only. Allowing the third adds a permanently-live edge case for no functional benefit. Hard fail (not warn) matches the fail-fast posture already used for login/purge failures (§5 Decisions #4/#16) |
+| 26 | **Found after shipping:** `DownloadManager` runs a background sweep (`PurgeUnselected`, `StartGC`) that auto-removes any category-tagged torrent added more than `DOWNLOAD_UNSELECTED_TIMEOUT` ago with **no file ever selected** | Rely on the user to manually delete abandoned entries; no cleanup at all | Every "Download" tap on a result row adds the magnet to qBittorrent immediately (to fetch metadata and show the file list) — before the user has chosen anything. Closing the panel without selecting a file (or a dead magnet whose metadata never arrives) previously left that torrent in qBittorrent forever, since Decision #22 deliberately disabled the startup purge. A torrent with **any** selected file is a real, intentional download and is never touched by this, regardless of age — this only cleans up the "looked, didn't pick anything" case |
 
 ### 6.4 Configuration additions
 
@@ -776,6 +780,7 @@ qbittorrent-engine container are both live against the same qBittorrent instance
 |---|---|---|
 | `DOWNLOAD_ENGINE` | unset | `qbittorrent` enables the feature; unset = feature fully absent (routes 404, UI hidden) |
 | `DOWNLOAD_QBIT_CATEGORY` | `tsa-download` | qBittorrent category tag for app-managed downloads; **never purged** on startup (Decision #22) |
+| `DOWNLOAD_UNSELECTED_TIMEOUT` | `900` (s) | How long a torrent may sit with no file selected before `PurgeUnselected` removes it (Decision #26) |
 
 Reused unchanged from §5.4: `STREAM_QBIT_HOST/USER/PASS/REMOTE_ROOT/
 DOWNLOAD_DIR/POLL_INTERVAL` (Assumption #4). README.md's Configuration table
@@ -813,14 +818,17 @@ client, qbit, err := buildClient(cfg) // unchanged from §5.5, except:
 downloadMgr, err := buildDownloadManager(cfg) // new; nil, nil if DownloadEngine != "qbittorrent"
 // buildDownloadManager: stream.NewDownloadManager(cfg.QBitHost, cfg.QBitUser,
 // cfg.QBitPass, cfg.QBitRemoteRoot, cfg.QBitDownloadDir, cfg.DownloadQBitCategory,
-// cfg.QBitPollInterval) — fail-fast (log.Fatalf) on error, same posture as buildClient.
+// cfg.QBitPollInterval, cfg.DownloadUnselectedTimeout) — fail-fast (log.Fatalf)
+// on error, same posture as buildClient.
 
 mgr := stream.NewManager(cfg, client)
 handler := stream.NewHandler(mgr, cfg)
 if downloadMgr != nil {
     handler.SetDownloadManager(downloadMgr) // Routes() only mounts /download-api/* now
+    downloadMgr.StartGC(cfg.GCInterval)      // Decision #26 — see 6.5.1 below
 }
 srv := &http.Server{Handler: handler.Routes(), /* ... */}
+// on shutdown: mgr.Close(); if downloadMgr != nil { downloadMgr.Close() }
 ```
 
 `SetDownloadManager` is a setter on `Handler` (not a `NewHandler` parameter)
@@ -830,6 +838,47 @@ sites need no changes — `Routes()` mounts `/download-api/*` only when
 unconfigured) when `DOWNLOAD_ENGINE` is unset. No interaction with the
 Stream engine-selection switch at all (enforced structurally by Decision
 #25 making the two mutually exclusive at the `qbittorrent` value).
+
+#### 6.5.1 Automatic cleanup of never-selected torrents (Decision #26)
+
+**Found after shipping:** tapping "Download" on a result row adds the magnet
+to qBittorrent and waits for metadata *before* the user has selected
+anything — that's how the file picker gets populated. If the user closes the
+panel without selecting a file (changed their mind, wrong result, or the
+magnet's metadata never arrives at all), that torrent had no cleanup path:
+Decision #22 deliberately disabled the streaming engine's startup-purge
+behavior for downloads (persistence being the whole point), and there's no
+idle-GC for Download the way `Manager` has for Stream sessions (Decision #2
+in §6.2 — Download is stateless-over-qBittorrent by design, so there's no
+in-memory session to time out in the first place).
+
+`DownloadManager` now runs its own lightweight sweep instead, independent of
+`Manager`'s Stream-side GC:
+
+- **`PurgeUnselected(ctx)`** lists every torrent in the download category via
+  `GetTorrentsCtx`, and for each one older than `DOWNLOAD_UNSELECTED_TIMEOUT`
+  (`qbt.Torrent.AddedOn`, which qBittorrent already tracks — no bookkeeping
+  of our own needed), checks whether *any* file has been promoted above
+  priority 0 (`GetFilesInformationCtx`). If nothing has ever been selected —
+  including the case where metadata never arrived at all, so there's no file
+  list to select from, a dead-magnet case this also cleans up — it deletes
+  the torrent and its data. A torrent with even one selected file is a real,
+  intentional download and is skipped regardless of age. A transient
+  `GetFilesInformationCtx` failure skips that torrent for this tick rather
+  than risking a delete without having actually confirmed it's unselected.
+- **`StartGC(interval)`** ticks this every `cfg.GCInterval` (the same 30s
+  default already used by Stream's idle-GC — reused rather than introducing
+  a second cadence knob) — mirrors `Manager.StartGC`'s shape (`stopGC`
+  channel, `sync.WaitGroup`, a `Close()` that waits for any in-flight sweep).
+- **Clock injection:** `DownloadManager.now func() time.Time` (defaulting to
+  `time.Now`, overridable via `SetClock` — mirrors `Manager`'s identical
+  pattern) makes the timeout check deterministic in tests without needing to
+  actually sleep 15 minutes.
+
+This is scoped narrowly: it only ever removes a torrent that has **zero**
+selected files, so it can't interfere with or race an in-progress download —
+the moment `SelectFiles` promotes even one file, that torrent is permanently
+exempt from this sweep for the rest of its life.
 
 ### 6.6 HTTP API (`/download-api/*`)
 
@@ -911,10 +960,20 @@ whole polled-detail call.
   "Stream" one (both togglable independently; opening one closes the
   other). Unlike `StreamPanel`'s per-row expand, the file list here is
   **checkboxes** (multi-select, matching `SelectFiles`'s additive
-  semantics) with a "Download N files" button that calls
-  `createDownload` → `selectFiles`, then shows a static confirmation
-  ("check the Downloads list for progress") — it does not itself poll,
-  since `DownloadsModal` owns that independently once the job is started.
+  semantics), with a **"Select all"/"Deselect all"** checkbox (indeterminate
+  state when some-but-not-all are checked; hidden for single-file torrents)
+  above the list for season packs. The start button uses the plain default
+  button style — not `.btn-solid` (the bright white CTA style reserved for
+  standalone actions like the forum-fallback search button), which visually
+  clashed with every other button in the panel (found post-ship). It calls
+  `createDownload` → `selectFiles`, then shows a static confirmation ("check
+  the Downloads list for progress") — it does not itself poll, since
+  `DownloadsModal` owns that independently once the job is started. Because
+  `.stream-files` scrolls internally past `max-height: 60vh` (existing rule,
+  shared with `StreamPanel`), a season pack's start button is wrapped in a
+  `.download-start-bar` with `position: sticky; bottom: 0` (found post-ship)
+  so it stays reachable while scrolling a long file list instead of sitting
+  below the fold.
 - `playerLinks.js` gained a sibling to `buildStreamUrl`:
   `buildDownloadUrl(hash, fileIndex, filename, origin)`, building
   `${origin}/download-api/stream/{hash}/{index}/{filename}` — kept as a
@@ -926,17 +985,33 @@ whole polled-detail call.
   (`HardDriveDownload`, next to the existing Settings gear in `App.jsx`),
   rendered only when `useDownloadsEnabled()` is `true`. Polls `GET
   /download-api/torrents` for the list (name/progress/speed/state per
-  card); each card expands (lazy-fetching `GET
-  /download-api/torrents/{hash}` on first expand, matching
-  `ForumTopicRow`'s lazy-fetch idiom) to show only the **selected** files,
-  each with player deep-links (via `playerLinks.js` +
-  `buildDownloadUrl`), a plain "Download file" link (`?dl=1`), and a Copy
-  link button. **Delete** is a two-click confirm (first click turns the
-  button into "Confirm delete?"; the second actually calls
-  `deleteDownload` and removes the card) rather than a separate dialog —
-  cheapest irreversible-action guard that fits the existing card layout,
-  consistent with Assumption #8 (delete always removes files, no "keep
-  files" variant to choose between).
+  card, `memo`-wrapped with a field-level comparator since the polled
+  `entry` is a new object every tick regardless of whether that torrent
+  actually changed — found during a performance pass, see below); each
+  card expands to show only the **selected** files, each with player
+  deep-links (via `playerLinks.js` + `buildDownloadUrl`), a plain "Download
+  file" link (`?dl=1`), and a Copy link button. **Found post-ship:** file
+  detail was originally fetched once on first expand and cached forever, so
+  a season pack's individual file progress froze at whatever it was when
+  the card was opened even as the parent card's aggregate bar kept
+  updating — fixed by re-fetching on every expand *and* re-polling every
+  `POLL_INTERVAL` while expanded (mirroring `StatsModal`'s live-progress
+  pattern), stopping on collapse/unmount. **Delete** is a two-click confirm
+  (first click turns the button into "Confirm delete?"; the second actually
+  calls `deleteDownload` and removes the card) rather than a separate
+  dialog — cheapest irreversible-action guard that fits the existing card
+  layout, consistent with Assumption #8 (delete always removes files, no
+  "keep files" variant to choose between). Its action row uses a dedicated
+  `.stats-card-actions` class rather than the generic `.actions` — a bare
+  `.actions` here would have unintentionally inherited `.modal .actions`'s
+  `justify-content: flex-end`/`margin-top: 20px` since the card lives
+  inside `.modal` (found post-ship).
+- **Mobile:** adding the Download button turned `.result-row .actions` into
+  a 3-button row and `.forum-link-row .actions` into a possible 4-button row
+  (Torrent file / Stream / Download / Copy magnet); neither had
+  `flex-wrap`, risking overflow on narrow viewports — added in the existing
+  `@media (max-width: 768px)` block (found post-ship, alongside the
+  `.stats-card-actions` fix above).
 
 ### 6.8 Error handling & edge cases
 
@@ -962,7 +1037,17 @@ whole polled-detail call.
   returns `ErrDownloadNotFound` for an unknown hash and — the review-driven
   fix — **degrades gracefully** (keeps torrent-level info, `Files: nil`)
   when only the files call fails; `Delete` always passes
-  `deleteFiles=true`.
+  `deleteFiles=true`. **`PurgeUnselected`/`StartGC` (Decision #26,
+  found-after-shipping):** a too-young unselected torrent is kept; an old
+  unselected one is removed; an old torrent with no metadata at all (no
+  files entry) is removed the same way (vacuously unselected — also cleans
+  up dead magnets); an old torrent with *any* selected file is kept
+  regardless of age; a transient `GetFilesInformationCtx` error skips that
+  torrent for the tick rather than deleting without confirmation; a mixed
+  batch only purges the eligible ones. `SetClock` (mirrors `Manager`'s
+  identical pattern) makes the timeout check deterministic without sleeping.
+  `StartGC`/`Close` get one end-to-end smoke test confirming the background
+  ticker actually invokes the sweep and `Close` doesn't hang.
 - `download_stream_test.go`: `OpenFile` computes each file's offset by
   summing prior files' sizes (index-sorted), returns `ErrFileIndex` out of
   range, and — the other review-driven fix — returns a *plain* wrapped
@@ -989,14 +1074,22 @@ whole polled-detail call.
 
 **Frontend (Vitest + RTL), as shipped:** `downloader.test.js` (fetch-mocked,
 mirrors `streamer.test.js`); `DownloadPanel.test.jsx` (checkbox multi-select,
-start-download flow, error/retry, empty-torrent state); `DownloadsModal.test.jsx`
-(empty state, list + lazy-expand showing only selected files with player
-links, two-click delete confirm, unreachable-backend error state);
-`downloadCapabilityContext.test.jsx` (button hidden with no provider at all,
-hidden while `enabled:false`, shown once `getStatus()` resolves
-`enabled:true` — covering the "no provider" case explicitly, since the
-context's default value of `false`, not `null`, is what keeps `ResultTabs`
-safe to render without one).
+select-all/deselect-all including the single-file-torrent case where the
+toggle is hidden, start-download flow, error/retry, empty-torrent state);
+`DownloadsModal.test.jsx` (empty state, list + expand showing only selected
+files with player links, **re-expanding after collapsing re-fetches file
+progress rather than showing stale cached data** — the regression test for
+the frozen-progress fix above — two-click delete confirm, unreachable-backend
+error state); `downloadCapabilityContext.test.jsx` (button hidden with no
+provider at all, hidden while `enabled:false`, shown once `getStatus()`
+resolves `enabled:true` — covering the "no provider" case explicitly, since
+the context's default value of `false`, not `null`, is what keeps
+`ResultTabs` safe to render without one). The `DownloadCard` `memo`
+comparator itself isn't asserted via a render-count test — that would mean
+exporting internals or adding test-only instrumentation to prove an
+implementation detail, which this codebase's existing RTL-style,
+behavior-focused tests deliberately avoid; the behavioral tests above all
+still pass unchanged with it in place.
 
 **Pre-existing, unrelated:** `StreamModal.test.jsx` (despite its filename,
 tests `StreamPanel.jsx`) fails independently of this work — it renders
@@ -1013,4 +1106,9 @@ download link both work → Delete → confirm removed from qBittorrent. Set
 `STREAM_ENGINE=qbittorrent` alongside `DOWNLOAD_ENGINE=qbittorrent` → confirm
 the streamer refuses to start (Decision #25). Restart the streamer mid-download
 → confirm the download list still shows it (qBittorrent is the source of
-truth, unaffected by the streamer process restarting).
+truth, unaffected by the streamer process restarting). **Decision #26:** tap
+Download on a row, let the file list load, close the panel without selecting
+anything (or set `DOWNLOAD_UNSELECTED_TIMEOUT=10` for a fast check) → confirm
+that torrent disappears from qBittorrent on its own after the timeout, while
+a *different* torrent where at least one file was selected is left alone
+indefinitely.

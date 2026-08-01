@@ -69,7 +69,8 @@ func buildDownloadManager(cfg stream.Config) (*stream.DownloadManager, error) {
 		return nil, nil
 	}
 	return stream.NewDownloadManager(cfg.QBitHost, cfg.QBitUser, cfg.QBitPass,
-		cfg.QBitRemoteRoot, cfg.QBitDownloadDir, cfg.DownloadQBitCategory, cfg.QBitPollInterval)
+		cfg.QBitRemoteRoot, cfg.QBitDownloadDir, cfg.DownloadQBitCategory, cfg.QBitPollInterval,
+		cfg.DownloadUnselectedTimeout)
 }
 
 func main() {
@@ -119,7 +120,9 @@ func main() {
 	handler := stream.NewHandler(mgr, cfg)
 	if downloadMgr != nil {
 		handler.SetDownloadManager(downloadMgr)
-		log.Printf("streamer: download manager enabled (category=%s)", cfg.DownloadQBitCategory)
+		downloadMgr.StartGC(cfg.GCInterval)
+		log.Printf("streamer: download manager enabled (category=%s, unselected-timeout=%s)",
+			cfg.DownloadQBitCategory, cfg.DownloadUnselectedTimeout)
 	}
 
 	srv := &http.Server{
@@ -147,4 +150,7 @@ func main() {
 		trackers.Close()
 	}
 	mgr.Close()
+	if downloadMgr != nil {
+		downloadMgr.Close()
+	}
 }

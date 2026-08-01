@@ -85,12 +85,16 @@ func TestValidateEngines(t *testing.T) {
 func TestLoadConfig_DownloadEngineDefaults(t *testing.T) {
 	t.Setenv("DOWNLOAD_ENGINE", "")
 	t.Setenv("DOWNLOAD_QBIT_CATEGORY", "")
+	t.Setenv("DOWNLOAD_UNSELECTED_TIMEOUT", "")
 	cfg := LoadConfig()
 	if cfg.DownloadEngine != "" {
 		t.Errorf("DownloadEngine default = %q, want empty", cfg.DownloadEngine)
 	}
 	if cfg.DownloadQBitCategory != "tsa-download" {
 		t.Errorf("DownloadQBitCategory default = %q, want %q", cfg.DownloadQBitCategory, "tsa-download")
+	}
+	if cfg.DownloadUnselectedTimeout != 15*time.Minute {
+		t.Errorf("DownloadUnselectedTimeout default = %v, want 15m", cfg.DownloadUnselectedTimeout)
 	}
 }
 

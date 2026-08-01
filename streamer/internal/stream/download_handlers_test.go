@@ -21,7 +21,7 @@ import (
 // TorrentClient.
 func newDownloadTestServer(t *testing.T, fake *fakeQbtAPI) (*DownloadManager, http.Handler) {
 	t.Helper()
-	dm, err := newDownloadManagerWithAPI(fake, "/data/downloads", t.TempDir(), "tsa-download", 2*time.Millisecond)
+	dm, err := newDownloadManagerWithAPI(fake, "/data/downloads", t.TempDir(), "tsa-download", 2*time.Millisecond, time.Hour)
 	if err != nil {
 		t.Fatalf("newDownloadManagerWithAPI: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestCreateDownload_BadRequest(t *testing.T) {
 
 func TestCreateDownload_MetadataTimeout(t *testing.T) {
 	fake := newFakeQbtAPI()
-	dm, err := newDownloadManagerWithAPI(fake, "/data/downloads", t.TempDir(), "tsa-download", 2*time.Millisecond)
+	dm, err := newDownloadManagerWithAPI(fake, "/data/downloads", t.TempDir(), "tsa-download", 2*time.Millisecond, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -176,7 +176,7 @@ func TestDownloadReader_TorrentGoneOutOfBand(t *testing.T) {
 
 func newTestDownloadManagerWithDirs(t *testing.T, fake *fakeQbtAPI, remoteRoot, downloadDir string) *DownloadManager {
 	t.Helper()
-	m, err := newDownloadManagerWithAPI(fake, remoteRoot, downloadDir, "tsa-download", 2*time.Millisecond)
+	m, err := newDownloadManagerWithAPI(fake, remoteRoot, downloadDir, "tsa-download", 2*time.Millisecond, time.Hour)
 	if err != nil {
 		t.Fatalf("newDownloadManagerWithAPI: %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	qbt "github.com/autobrr/go-qbittorrent"
@@ -57,6 +58,20 @@ type DownloadManager struct {
 	downloadDir  string
 	category     string
 	pollInterval time.Duration
+
+	// unselectedTimeout and now back PurgeUnselected's idle sweep (Decision
+	// #26) — see StartGC.
+	unselectedTimeout time.Duration
+	now               func() time.Time // injectable clock for tests
+
+	stopGC chan struct{}
+	// gcCancel cancels the context passed to an in-flight PurgeUnselected
+	// sweep. Set by StartGC (nil if it was never called); Close invokes it so
+	// a slow sweep (many torrents, each API call individually bounded by
+	// apiTimeout) can't make shutdown block for the sweep's full remaining
+	// duration — each call fails fast once its context is cancelled instead.
+	gcCancel context.CancelFunc
+	wg       sync.WaitGroup
 }
 
 // NewDownloadManager builds a DownloadManager backed by a running qBittorrent
@@ -65,15 +80,15 @@ type DownloadManager struct {
 // NOT purge category on startup (Decision #22) — downloads must survive a
 // streamer restart, the opposite lifecycle of the streaming engine's own
 // category.
-func NewDownloadManager(host, user, pass, remoteRoot, downloadDir, category string, pollInterval time.Duration) (*DownloadManager, error) {
+func NewDownloadManager(host, user, pass, remoteRoot, downloadDir, category string, pollInterval, unselectedTimeout time.Duration) (*DownloadManager, error) {
 	api := qbt.NewClient(qbt.Config{Host: host, Username: user, Password: pass, Timeout: 10})
-	return newDownloadManagerWithAPI(api, remoteRoot, downloadDir, category, pollInterval)
+	return newDownloadManagerWithAPI(api, remoteRoot, downloadDir, category, pollInterval, unselectedTimeout)
 }
 
 // newDownloadManagerWithAPI holds the fail-fast startup logic against the
 // qbtAPI interface rather than the concrete *qbt.Client, so it's unit-testable
 // with a fake — no live qBittorrent instance needed.
-func newDownloadManagerWithAPI(api qbtAPI, remoteRoot, downloadDir, category string, pollInterval time.Duration) (*DownloadManager, error) {
+func newDownloadManagerWithAPI(api qbtAPI, remoteRoot, downloadDir, category string, pollInterval, unselectedTimeout time.Duration) (*DownloadManager, error) {
 	loginCtx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
 	if err := api.LoginCtx(loginCtx); err != nil {
@@ -89,12 +104,127 @@ func newDownloadManagerWithAPI(api qbtAPI, remoteRoot, downloadDir, category str
 	}
 
 	return &DownloadManager{
-		api:          api,
-		remoteRoot:   remoteRoot,
-		downloadDir:  downloadDir,
-		category:     category,
-		pollInterval: pollInterval,
+		api:               api,
+		remoteRoot:        remoteRoot,
+		downloadDir:       downloadDir,
+		category:          category,
+		pollInterval:      pollInterval,
+		unselectedTimeout: unselectedTimeout,
+		now:               time.Now,
+		stopGC:            make(chan struct{}),
 	}, nil
+}
+
+// SetClock overrides the clock used for the unselected-timeout check (tests only).
+func (m *DownloadManager) SetClock(now func() time.Time) { m.now = now }
+
+// StartGC launches the background sweep that removes torrents no file has
+// ever been selected for (PurgeUnselected), every interval. The context
+// handed to each sweep is cancelled by Close, not left as
+// context.Background() — PurgeUnselected can make several sequential,
+// apiTimeout-bounded API calls per torrent, and without this, Close could
+// block for the sweep's entire remaining duration instead of returning
+// promptly on shutdown.
+func (m *DownloadManager) StartGC(interval time.Duration) {
+	gcCtx, cancel := context.WithCancel(context.Background())
+	m.gcCancel = cancel
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-m.stopGC:
+				return
+			case <-ticker.C:
+				if _, err := m.PurgeUnselected(gcCtx); err != nil && gcCtx.Err() == nil {
+					log.Printf("streamer: download purge-unselected sweep: %v", err)
+				}
+			}
+		}
+	}()
+}
+
+// Close stops the GC loop, cancelling any in-flight sweep so it unblocks
+// promptly instead of running to completion, then waits for the goroutine to
+// exit. Safe to call even if StartGC was never invoked.
+func (m *DownloadManager) Close() {
+	close(m.stopGC)
+	if m.gcCancel != nil {
+		m.gcCancel()
+	}
+	m.wg.Wait()
+}
+
+// PurgeUnselected removes any category-tagged torrent that was added at
+// least unselectedTimeout ago and still has no file selected — e.g. a user
+// opened the file picker to see what's in a magnet and then never picked
+// anything (§6 Decision #26). A torrent whose metadata never arrived (so it
+// has no files at all yet) is vacuously "nothing selected" and is swept the
+// same way, which also cleans up dead/unreachable magnets. A torrent with
+// at least one selected file is a real, intentional download and is never
+// touched here, regardless of age. Returns the hashes it removed (for
+// logging and tests).
+func (m *DownloadManager) PurgeUnselected(ctx context.Context) ([]string, error) {
+	listCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+	torrents, err := m.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Category: m.category})
+	cancel()
+	if err != nil {
+		return nil, fmt.Errorf("download: purge-unselected list: %w", err)
+	}
+
+	cutoff := m.now().Add(-m.unselectedTimeout).Unix()
+	var removed []string
+	for _, t := range torrents {
+		if ctx.Err() != nil {
+			// Cancelled mid-sweep (Close, during shutdown) — stop touching
+			// more torrents rather than let every remaining one fail its API
+			// calls one at a time before the loop naturally ends.
+			break
+		}
+		if t.AddedOn > cutoff {
+			continue // not old enough yet
+		}
+
+		filesCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+		files, err := m.api.GetFilesInformationCtx(filesCtx, t.Hash)
+		cancel()
+		if err != nil {
+			// Transient failure — leave it for the next tick rather than risk
+			// deleting something we couldn't actually verify was unselected.
+			log.Printf("streamer: download purge-unselected check hash=%.8s: %v (skipping this tick)", t.Hash, err)
+			continue
+		}
+		if hasSelectedFile(files) {
+			continue
+		}
+
+		delCtx, cancel2 := context.WithTimeout(ctx, apiTimeout)
+		err = m.api.DeleteTorrentsCtx(delCtx, []string{t.Hash}, true)
+		cancel2()
+		if err != nil {
+			log.Printf("streamer: download purge-unselected delete hash=%.8s: %v", t.Hash, err)
+			continue
+		}
+		log.Printf("streamer: download purge-unselected removed hash=%.8s name=%q (never selected)", t.Hash, t.Name)
+		removed = append(removed, t.Hash)
+	}
+	return removed, nil
+}
+
+// hasSelectedFile reports whether any file has been promoted above priority
+// 0. nil/empty (metadata not yet arrived) counts as "nothing selected."
+func hasSelectedFile(files *qbt.TorrentFiles) bool {
+	if files == nil {
+		return false
+	}
+	for _, f := range *files {
+		if f.Priority > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // AddTorrent adds a magnet tagged with the download category and blocks

@@ -74,6 +74,13 @@ type Config struct {
 	// Unlike QBitCategory, this is never purged on startup: downloads are
 	// intentionally persistent (Decision #22).
 	DownloadQBitCategory string
+	// DownloadUnselectedTimeout is how long a download-manager torrent may
+	// sit with no file selected (e.g. the user opened the file picker to see
+	// what's in a magnet, then never picked anything) before it's
+	// automatically removed. Does not apply once at least one file has been
+	// selected — that torrent is a real, intentional download and is never
+	// swept (Decision #26).
+	DownloadUnselectedTimeout time.Duration
 }
 
 // LoadConfig reads configuration from the environment, applying defaults for
@@ -101,8 +108,9 @@ func LoadConfig() Config {
 		QBitCategory:     envStr("STREAM_QBIT_CATEGORY", "tsa-stream-engine"),
 		QBitPollInterval: envSeconds("STREAM_QBIT_POLL_INTERVAL", 1),
 
-		DownloadEngine:       envStr("DOWNLOAD_ENGINE", ""),
-		DownloadQBitCategory: envStr("DOWNLOAD_QBIT_CATEGORY", "tsa-download"),
+		DownloadEngine:            envStr("DOWNLOAD_ENGINE", ""),
+		DownloadQBitCategory:      envStr("DOWNLOAD_QBIT_CATEGORY", "tsa-download"),
+		DownloadUnselectedTimeout: envSeconds("DOWNLOAD_UNSELECTED_TIMEOUT", 900), // 15m
 	}
 }
 

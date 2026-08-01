@@ -12,14 +12,14 @@ import (
 func TestNewDownloadManagerWithAPI_LoginFailure(t *testing.T) {
 	fake := newFakeQbtAPI()
 	fake.loginErr = errors.New("bad credentials")
-	if _, err := newDownloadManagerWithAPI(fake, "/remote", t.TempDir(), "tsa-download", time.Second); err == nil {
+	if _, err := newDownloadManagerWithAPI(fake, "/remote", t.TempDir(), "tsa-download", time.Second, time.Hour); err == nil {
 		t.Fatal("expected login failure to be fatal")
 	}
 }
 
 func TestNewDownloadManagerWithAPI_MissingDownloadDir(t *testing.T) {
 	fake := newFakeQbtAPI()
-	if _, err := newDownloadManagerWithAPI(fake, "/remote", "/nonexistent/path/xyz", "tsa-download", time.Second); err == nil {
+	if _, err := newDownloadManagerWithAPI(fake, "/remote", "/nonexistent/path/xyz", "tsa-download", time.Second, time.Hour); err == nil {
 		t.Fatal("expected error for missing download dir")
 	}
 }
@@ -32,7 +32,7 @@ func TestNewDownloadManagerWithAPI_DoesNotPurge(t *testing.T) {
 	fake := newFakeQbtAPI()
 	fake.torrents["existing"] = qbt.Torrent{Hash: "existing", Category: "tsa-download"}
 
-	if _, err := newDownloadManagerWithAPI(fake, "/remote", t.TempDir(), "tsa-download", time.Second); err != nil {
+	if _, err := newDownloadManagerWithAPI(fake, "/remote", t.TempDir(), "tsa-download", time.Second, time.Hour); err != nil {
 		t.Fatalf("newDownloadManagerWithAPI: %v", err)
 	}
 	if len(fake.deleteCalls) != 0 {
@@ -42,7 +42,10 @@ func TestNewDownloadManagerWithAPI_DoesNotPurge(t *testing.T) {
 
 func newTestDownloadManager(t *testing.T, fake *fakeQbtAPI) *DownloadManager {
 	t.Helper()
-	m, err := newDownloadManagerWithAPI(fake, "/data/downloads", t.TempDir(), "tsa-download", 2*time.Millisecond)
+	// A long unselectedTimeout here so PurgeUnselected-related behavior never
+	// interferes with tests that aren't about it — see
+	// TestDownloadManager_PurgeUnselected* below for that.
+	m, err := newDownloadManagerWithAPI(fake, "/data/downloads", t.TempDir(), "tsa-download", 2*time.Millisecond, time.Hour)
 	if err != nil {
 		t.Fatalf("newDownloadManagerWithAPI: %v", err)
 	}
@@ -252,5 +255,238 @@ func TestDownloadManager_Delete_AlwaysDeletesFiles(t *testing.T) {
 	}
 	if len(fake.deleteCalls) != 1 || len(fake.deleteCalls[0]) != 1 || fake.deleteCalls[0][0] != "hash1" {
 		t.Fatalf("unexpected delete calls: %v", fake.deleteCalls)
+	}
+}
+
+// --- PurgeUnselected (Decision #26) ---
+
+var purgeUnselectedBase = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// newPurgeTestManager builds a manager with a 1h unselectedTimeout and its
+// clock fixed at purgeUnselectedBase, so tests can place torrents on either
+// side of the cutoff by setting AddedOn relative to that instant.
+func newPurgeTestManager(t *testing.T, fake *fakeQbtAPI) *DownloadManager {
+	t.Helper()
+	m, err := newDownloadManagerWithAPI(fake, "/data/downloads", t.TempDir(), "tsa-download", 2*time.Millisecond, time.Hour)
+	if err != nil {
+		t.Fatalf("newDownloadManagerWithAPI: %v", err)
+	}
+	m.SetClock(func() time.Time { return purgeUnselectedBase })
+	return m
+}
+
+func TestDownloadManager_PurgeUnselected_TooYoungIsKept(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newPurgeTestManager(t, fake)
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Category: "tsa-download", AddedOn: purgeUnselectedBase.Add(-30 * time.Minute).Unix()}
+	// No files entry at all — metadata hasn't arrived, definitely unselected —
+	// but it's not old enough yet, so it must survive regardless.
+
+	removed, err := m.PurgeUnselected(context.Background())
+	if err != nil {
+		t.Fatalf("PurgeUnselected: %v", err)
+	}
+	if len(removed) != 0 || len(fake.deleteCalls) != 0 {
+		t.Errorf("expected nothing purged (too young), got removed=%v deletes=%v", removed, fake.deleteCalls)
+	}
+}
+
+func TestDownloadManager_PurgeUnselected_OldAndUnselectedIsRemoved(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newPurgeTestManager(t, fake)
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Name: "Abandoned", Category: "tsa-download", AddedOn: purgeUnselectedBase.Add(-2 * time.Hour).Unix()}
+	fake.files["a"] = qbt.TorrentFiles{
+		{Index: 0, Name: "a.mkv", Size: 100, Priority: 0},
+		{Index: 1, Name: "b.mkv", Size: 100, Priority: 0},
+	}
+
+	removed, err := m.PurgeUnselected(context.Background())
+	if err != nil {
+		t.Fatalf("PurgeUnselected: %v", err)
+	}
+	if len(removed) != 1 || removed[0] != "a" {
+		t.Fatalf("expected [a] removed, got %v", removed)
+	}
+	if len(fake.deleteCalls) != 1 || fake.deleteCalls[0][0] != "a" {
+		t.Errorf("unexpected delete calls: %v", fake.deleteCalls)
+	}
+}
+
+// TestDownloadManager_PurgeUnselected_OldWithNoMetadataIsRemoved covers a
+// dead/unreachable magnet: added long ago, metadata never arrived, so there
+// are no files to have ever selected — vacuously unselected, and swept the
+// same as an abandoned file picker.
+func TestDownloadManager_PurgeUnselected_OldWithNoMetadataIsRemoved(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newPurgeTestManager(t, fake)
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Category: "tsa-download", AddedOn: purgeUnselectedBase.Add(-2 * time.Hour).Unix()}
+	// No fake.files["a"] entry — GetFilesInformationCtx returns nil, nil.
+
+	removed, err := m.PurgeUnselected(context.Background())
+	if err != nil {
+		t.Fatalf("PurgeUnselected: %v", err)
+	}
+	if len(removed) != 1 || removed[0] != "a" {
+		t.Fatalf("expected [a] removed, got %v", removed)
+	}
+}
+
+func TestDownloadManager_PurgeUnselected_OldButSelectedIsKept(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newPurgeTestManager(t, fake)
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Category: "tsa-download", AddedOn: purgeUnselectedBase.Add(-2 * time.Hour).Unix()}
+	fake.files["a"] = qbt.TorrentFiles{
+		{Index: 0, Name: "a.mkv", Size: 100, Priority: 0},
+		{Index: 1, Name: "b.mkv", Size: 100, Priority: 1}, // selected
+	}
+
+	removed, err := m.PurgeUnselected(context.Background())
+	if err != nil {
+		t.Fatalf("PurgeUnselected: %v", err)
+	}
+	if len(removed) != 0 || len(fake.deleteCalls) != 0 {
+		t.Errorf("expected a real download (has a selected file) to survive, got removed=%v deletes=%v", removed, fake.deleteCalls)
+	}
+}
+
+func TestDownloadManager_PurgeUnselected_TransientFileCheckErrorSkipsNotDeletes(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newPurgeTestManager(t, fake)
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Category: "tsa-download", AddedOn: purgeUnselectedBase.Add(-2 * time.Hour).Unix()}
+	fake.filesErr = errors.New("qbittorrent unreachable")
+
+	removed, err := m.PurgeUnselected(context.Background())
+	if err != nil {
+		t.Fatalf("PurgeUnselected should not itself fail on a per-torrent check error: %v", err)
+	}
+	if len(removed) != 0 || len(fake.deleteCalls) != 0 {
+		t.Errorf("a torrent whose unselected-ness couldn't be verified must not be deleted, got removed=%v deletes=%v", removed, fake.deleteCalls)
+	}
+}
+
+func TestDownloadManager_PurgeUnselected_OnlyPurgesTheEligibleOnes(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newPurgeTestManager(t, fake)
+	old := purgeUnselectedBase.Add(-2 * time.Hour).Unix()
+	young := purgeUnselectedBase.Add(-1 * time.Minute).Unix()
+
+	fake.torrents["old-unselected"] = qbt.Torrent{Hash: "old-unselected", Category: "tsa-download", AddedOn: old}
+	fake.files["old-unselected"] = qbt.TorrentFiles{{Index: 0, Name: "a.mkv", Size: 1, Priority: 0}}
+
+	fake.torrents["old-selected"] = qbt.Torrent{Hash: "old-selected", Category: "tsa-download", AddedOn: old}
+	fake.files["old-selected"] = qbt.TorrentFiles{{Index: 0, Name: "a.mkv", Size: 1, Priority: 1}}
+
+	fake.torrents["young-unselected"] = qbt.Torrent{Hash: "young-unselected", Category: "tsa-download", AddedOn: young}
+
+	removed, err := m.PurgeUnselected(context.Background())
+	if err != nil {
+		t.Fatalf("PurgeUnselected: %v", err)
+	}
+	if len(removed) != 1 || removed[0] != "old-unselected" {
+		t.Fatalf("expected only old-unselected removed, got %v", removed)
+	}
+}
+
+// TestDownloadManager_StartGC_SweepsOnATick is an end-to-end smoke test of
+// the background loop itself (as opposed to PurgeUnselected's logic in
+// isolation above): a torrent old and unselected enough at construction
+// time should be gone after StartGC has had at least one tick to run, and
+// Close must return promptly rather than hang.
+func TestDownloadManager_StartGC_SweepsOnATick(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newPurgeTestManager(t, fake)
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Category: "tsa-download", AddedOn: purgeUnselectedBase.Add(-2 * time.Hour).Unix()}
+
+	m.StartGC(5 * time.Millisecond)
+	defer m.Close()
+
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		// fake.getDeleteCallCount(), not len(fake.deleteCalls) directly — the
+		// background sweep goroutine writes deleteCalls under fake.mu via
+		// DeleteTorrentsCtx concurrently with this polling loop.
+		if fake.getDeleteCallCount() > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("expected StartGC's sweep to have deleted the unselected torrent by now")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// TestDownloadManager_PurgeUnselected_StopsEarlyOnCancelledContext covers the
+// golang-pro-review fix: without the ctx.Err() check at the top of the loop,
+// a cancelled context wouldn't stop iteration — every remaining torrent
+// would still attempt (fast-failing) API calls one at a time before the loop
+// naturally ended.
+func TestDownloadManager_PurgeUnselected_StopsEarlyOnCancelledContext(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newPurgeTestManager(t, fake)
+	old := purgeUnselectedBase.Add(-2 * time.Hour).Unix()
+	// Both are old and have no files entry — vacuously unselected, so both
+	// would normally be removed in one sweep.
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Category: "tsa-download", AddedOn: old}
+	fake.torrents["b"] = qbt.Torrent{Hash: "b", Category: "tsa-download", AddedOn: old}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled before the sweep starts
+
+	removed, err := m.PurgeUnselected(ctx)
+	if err != nil {
+		t.Fatalf("PurgeUnselected: %v", err)
+	}
+	if len(removed) != 0 {
+		t.Errorf("expected the sweep to stop immediately on a cancelled context, got removed=%v", removed)
+	}
+}
+
+// blockingFilesAPI makes GetFilesInformationCtx block until its context is
+// cancelled, simulating a slow/hung qBittorrent call — used to prove Close
+// can actually interrupt an in-flight sweep rather than waiting for it to
+// run to completion.
+type blockingFilesAPI struct {
+	*fakeQbtAPI
+}
+
+func (b *blockingFilesAPI) GetFilesInformationCtx(ctx context.Context, hash string) (*qbt.TorrentFiles, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// TestDownloadManager_Close_UnblocksASlowSweepPromptly covers the
+// golang-pro-review fix: StartGC used to hand PurgeUnselected a bare
+// context.Background(), so Close had no way to interrupt a sweep stuck on a
+// slow API call — it would have blocked until that call returned on its own
+// (up to apiTimeout, or forever against a fake that never returns, as here).
+// With StartGC's sweep context now cancelled by Close, this must return
+// promptly instead.
+func TestDownloadManager_Close_UnblocksASlowSweepPromptly(t *testing.T) {
+	fake := newFakeQbtAPI()
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Category: "tsa-download", AddedOn: purgeUnselectedBase.Add(-2 * time.Hour).Unix()}
+	blocking := &blockingFilesAPI{fakeQbtAPI: fake}
+
+	m, err := newDownloadManagerWithAPI(blocking, "/data/downloads", t.TempDir(), "tsa-download", 2*time.Millisecond, time.Hour)
+	if err != nil {
+		t.Fatalf("newDownloadManagerWithAPI: %v", err)
+	}
+	m.SetClock(func() time.Time { return purgeUnselectedBase })
+
+	m.StartGC(5 * time.Millisecond)
+	// Give the sweep time to start and get stuck inside the blocking
+	// GetFilesInformationCtx call.
+	time.Sleep(20 * time.Millisecond)
+
+	done := make(chan struct{})
+	go func() {
+		m.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Close did not return promptly — the in-flight sweep's context was not cancelled")
 	}
 }
