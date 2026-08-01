@@ -112,23 +112,44 @@ func (m *DownloadManager) AddTorrent(ctx context.Context, magnet string) (Downlo
 		return DownloadInfo{}, ErrDownloadInvalidMagnet
 	}
 
-	opts := map[string]string{
-		"category":           m.category,
-		"sequentialDownload": "true",
-		"firstLastPiecePrio": "true",
-	}
-	addCtx, cancel := context.WithTimeout(ctx, apiTimeout)
-	_, err = m.api.AddTorrentFromUrlCtx(addCtx, clean, opts)
+	// A season pack's magnet may already be tracked from an earlier AddTorrent
+	// call for a different file in the same pack — qBittorrent rejects
+	// re-adding a hash it already knows with an HTTP 409 ("conflicts
+	// detected"). Detect that up front and skip the add, so picking a second
+	// file from an already-downloading pack doesn't fail.
+	checkCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+	existing, err := m.api.GetTorrentsCtx(checkCtx, qbt.TorrentFilterOptions{Hashes: []string{hash}})
 	cancel()
-	if err != nil {
-		return DownloadInfo{}, fmt.Errorf("download: add torrent: %w", err)
+	alreadyTracked := err == nil && len(existing) > 0
+
+	if !alreadyTracked {
+		opts := map[string]string{
+			"category":           m.category,
+			"sequentialDownload": "true",
+			"firstLastPiecePrio": "true",
+		}
+		addCtx, addCancel := context.WithTimeout(ctx, apiTimeout)
+		_, err = m.api.AddTorrentFromUrlCtx(addCtx, clean, opts)
+		addCancel()
+		if err != nil {
+			return DownloadInfo{}, fmt.Errorf("download: add torrent: %w", err)
+		}
+	}
+
+	// Already-tracked torrents use pollExistingOnce, which skips the
+	// zero-all-priorities step: the pack may have files already selected and
+	// downloading from an earlier SelectFiles call, and re-zeroing them here
+	// would silently stop that download.
+	poll := m.pollMetadataOnce
+	if alreadyTracked {
+		poll = m.pollExistingOnce
 	}
 
 	// Check once immediately before entering the ticker loop below — a ticker's
 	// first tick only fires after a full pollInterval, which would otherwise
 	// delay even already-available metadata (e.g. re-adding a hash qBittorrent
 	// already knows) by a needless wait.
-	if info, ready := m.pollMetadataOnce(ctx, hash); ready {
+	if info, ready := poll(ctx, hash); ready {
 		return info, nil
 	}
 
@@ -139,7 +160,7 @@ func (m *DownloadManager) AddTorrent(ctx context.Context, magnet string) (Downlo
 		case <-ctx.Done():
 			return DownloadInfo{}, ErrDownloadMetadataTimeout
 		case <-ticker.C:
-			info, ready := m.pollMetadataOnce(ctx, hash)
+			info, ready := poll(ctx, hash)
 			if ready {
 				return info, nil
 			}
@@ -147,38 +168,65 @@ func (m *DownloadManager) AddTorrent(ctx context.Context, magnet string) (Downlo
 	}
 }
 
-// pollMetadataOnce checks whether hash's metadata (piece count + file list) is
-// available yet; if so it zeroes every file's priority and returns the ready
-// DownloadInfo. API errors are treated as transient — AddTorrent's outer ctx
-// deadline remains the sole give-up point, consistent with the streaming
-// engine's metadata poller (Decision #15).
-func (m *DownloadManager) pollMetadataOnce(ctx context.Context, hash string) (DownloadInfo, bool) {
+// fetchReadyMetadata checks whether hash's metadata (piece count + file list)
+// is available yet, returning it if so. API errors are treated as transient —
+// AddTorrent's outer ctx deadline remains the sole give-up point, consistent
+// with the streaming engine's metadata poller (Decision #15).
+func (m *DownloadManager) fetchReadyMetadata(ctx context.Context, hash string) (qbt.TorrentProperties, qbt.TorrentFiles, bool) {
 	propsCtx, cancel := context.WithTimeout(ctx, apiTimeout)
 	props, err := m.api.GetTorrentPropertiesCtx(propsCtx, hash)
 	cancel()
 	if err != nil || props.PiecesNum <= 0 {
-		return DownloadInfo{}, false
+		return qbt.TorrentProperties{}, nil, false
 	}
 
 	filesCtx, cancel2 := context.WithTimeout(ctx, apiTimeout)
 	files, err := m.api.GetFilesInformationCtx(filesCtx, hash)
 	cancel2()
 	if err != nil || files == nil || len(*files) == 0 {
+		return qbt.TorrentProperties{}, nil, false
+	}
+	return props, *files, true
+}
+
+// pollMetadataOnce is fetchReadyMetadata for a freshly-added torrent: once
+// metadata is available it zeroes every file's priority and returns the ready
+// DownloadInfo — nothing downloads until an explicit SelectFiles call.
+func (m *DownloadManager) pollMetadataOnce(ctx context.Context, hash string) (DownloadInfo, bool) {
+	props, files, ready := m.fetchReadyMetadata(ctx, hash)
+	if !ready {
 		return DownloadInfo{}, false
 	}
 
-	ids := make([]string, len(*files))
-	for i := range *files {
+	ids := make([]string, len(files))
+	for i := range files {
 		ids[i] = strconv.Itoa(i)
 	}
-	zeroCtx, cancel3 := context.WithTimeout(ctx, apiTimeout)
+	zeroCtx, cancel := context.WithTimeout(ctx, apiTimeout)
 	_ = m.api.SetFilePriorityCtx(zeroCtx, hash, strings.Join(ids, "|"), 0)
-	cancel3()
+	cancel()
 
 	return DownloadInfo{
 		Hash:  hash,
 		Name:  props.Name,
-		Files: buildDownloadFiles(*files),
+		Files: buildDownloadFiles(files),
+	}, true
+}
+
+// pollExistingOnce is fetchReadyMetadata for a torrent AddTorrent found
+// already tracked (e.g. a second file picked from the same season-pack
+// magnet). Unlike pollMetadataOnce it never touches file priorities — the
+// pack may already have files selected and downloading from an earlier
+// SelectFiles call, and zeroing them here would silently stop that download.
+func (m *DownloadManager) pollExistingOnce(ctx context.Context, hash string) (DownloadInfo, bool) {
+	props, files, ready := m.fetchReadyMetadata(ctx, hash)
+	if !ready {
+		return DownloadInfo{}, false
+	}
+	return DownloadInfo{
+		Hash:  hash,
+		Name:  props.Name,
+		Files: buildDownloadFiles(files),
 	}, true
 }
 

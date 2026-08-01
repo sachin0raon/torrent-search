@@ -3,6 +3,7 @@ package stream
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"mime"
 	"net/http"
@@ -56,7 +57,7 @@ func (h *Handler) createDownload(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusGatewayTimeout, "couldn't fetch torrent info (no peers?)")
 		default:
 			log.Printf("streamer: download add torrent: %v", err)
-			writeError(w, http.StatusServiceUnavailable, "qbittorrent unavailable")
+			writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
 		}
 		return
 	}
@@ -77,7 +78,7 @@ func (h *Handler) selectDownloadFiles(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if err := h.dm.SelectFiles(ctx, r.PathValue("hash"), req.Indices); err != nil {
 		log.Printf("streamer: download select files hash=%s: %v", r.PathValue("hash"), err)
-		writeError(w, http.StatusServiceUnavailable, "qbittorrent unavailable")
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -89,7 +90,7 @@ func (h *Handler) listDownloads(w http.ResponseWriter, r *http.Request) {
 	list, err := h.dm.List(ctx)
 	if err != nil {
 		log.Printf("streamer: download list: %v", err)
-		writeError(w, http.StatusServiceUnavailable, "qbittorrent unavailable")
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -105,7 +106,7 @@ func (h *Handler) getDownload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("streamer: download get hash=%s: %v", r.PathValue("hash"), err)
-		writeError(w, http.StatusServiceUnavailable, "qbittorrent unavailable")
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, info)
@@ -116,7 +117,7 @@ func (h *Handler) deleteDownload(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if err := h.dm.Delete(ctx, r.PathValue("hash")); err != nil {
 		log.Printf("streamer: download delete hash=%s: %v", r.PathValue("hash"), err)
-		writeError(w, http.StatusServiceUnavailable, "qbittorrent unavailable")
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

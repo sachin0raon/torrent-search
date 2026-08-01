@@ -84,6 +84,47 @@ func TestDownloadManager_AddTorrent_ZerosAllPrioritiesOnceReady(t *testing.T) {
 	}
 }
 
+// TestDownloadManager_AddTorrent_AlreadyTrackedSkipsReAdd covers the
+// season-pack bug: picking a second file from a magnet whose torrent is
+// already known to qBittorrent (added earlier for a different file in the
+// same pack) must not re-call AddTorrentFromUrlCtx — qBittorrent rejects a
+// duplicate add with an HTTP 409 ("conflicts detected"), which previously
+// surfaced as a hard failure. It also must not zero the file priorities a
+// prior SelectFiles call already set, or the first file's in-flight download
+// would be silently stopped.
+func TestDownloadManager_AddTorrent_AlreadyTrackedSkipsReAdd(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newTestDownloadManager(t, fake)
+
+	const hash = "cccccccccccccccccccccccccccccccccccccccc"
+	fake.props[hash] = qbt.TorrentProperties{PiecesNum: 3, Name: "Show.S01", SavePath: "/data/downloads/Show.S01"}
+	fake.files[hash] = qbt.TorrentFiles{
+		{Index: 0, Name: "e01.mp4", Size: 100, Priority: 1}, // already selected from a prior file pick
+		{Index: 1, Name: "e02.mp4", Size: 100, Priority: 0},
+	}
+	fake.torrents[hash] = qbt.Torrent{Hash: hash, Category: "tsa-download"}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	info, err := m.AddTorrent(ctx, "magnet:?xt=urn:btih:"+hash)
+	if err != nil {
+		t.Fatalf("AddTorrent: %v", err)
+	}
+	if info.Hash != hash {
+		t.Errorf("unexpected info: %+v", info)
+	}
+
+	if len(fake.added) != 0 {
+		t.Errorf("expected no add-torrent call for an already-tracked hash, got %d", len(fake.added))
+	}
+	if calls := fake.getPriorityCalls(); len(calls) != 0 {
+		t.Errorf("expected no priority reset for an already-tracked hash, got %v", calls)
+	}
+	if !info.Files[0].Selected {
+		t.Errorf("expected already-selected file to stay selected: %+v", info.Files[0])
+	}
+}
+
 func TestDownloadManager_AddTorrent_MetadataTimeout(t *testing.T) {
 	fake := newFakeQbtAPI()
 	m := newTestDownloadManager(t, fake)
