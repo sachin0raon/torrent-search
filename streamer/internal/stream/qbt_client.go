@@ -213,6 +213,7 @@ type qbtTorrent struct {
 	mu             sync.Mutex
 	name           string
 	savePath       string
+	downloadPath   string // qBittorrent's separate incomplete-files path, if configured; empty otherwise
 	pieceSize      int64
 	filesCache     []TorrentFile
 	prioritized    int
@@ -267,6 +268,7 @@ func (t *qbtTorrent) pollMetadata() {
 			t.mu.Lock()
 			t.name = props.Name
 			t.savePath = props.SavePath
+			t.downloadPath = props.DownloadPath
 			t.pieceSize = int64(props.PieceSize)
 			t.filesCache = t.buildFiles(*files)
 			t.mu.Unlock()
@@ -495,12 +497,36 @@ func (f *qbtFile) BytesCompleted() int64 {
 
 func (f *qbtFile) NewReader() Reader {
 	f.torrent.mu.Lock()
-	savePath, pieceSize := f.torrent.savePath, f.torrent.pieceSize
+	savePath, downloadPath, pieceSize := f.torrent.savePath, f.torrent.downloadPath, f.torrent.pieceSize
 	f.torrent.mu.Unlock()
 
-	localPath, pathErr := mapPath(savePath, f.remoteRoot, f.downloadDir)
-	if pathErr == nil {
-		localPath = filepath.Join(localPath, f.name)
+	// qBittorrent reports two possible locations: save_path (the final
+	// destination) and download_path (a separate temp location used only while
+	// "Keep incomplete torrents in a different folder" is enabled). A file
+	// still downloading physically lives under download_path in that case, not
+	// save_path — so try it first, since NewReader is generally called on
+	// actively-streaming (often not-yet-complete) content, then fall back to
+	// save_path. Only a root that doesn't share remoteRoot's prefix is dropped;
+	// a root can still be a valid candidate even if the file isn't there *yet*
+	// (Read's ENOENT handling distinguishes "not ready" from "confirmed
+	// downloaded but truly missing" per-piece — see qbt_reader.go).
+	var candidates []string
+	var lastErr error
+	if downloadPath != "" {
+		if p, err := mapPath(downloadPath, f.remoteRoot, f.downloadDir); err == nil {
+			candidates = append(candidates, filepath.Join(p, f.name))
+		} else {
+			lastErr = err
+		}
+	}
+	if p, err := mapPath(savePath, f.remoteRoot, f.downloadDir); err == nil {
+		candidates = append(candidates, filepath.Join(p, f.name))
+	} else {
+		lastErr = err
+	}
+	var pathErr error
+	if len(candidates) == 0 {
+		pathErr = lastErr
 	}
 
 	f.torrent.acquireReader(f.index)
@@ -510,7 +536,7 @@ func (f *qbtFile) NewReader() Reader {
 		fileOffset:     f.fileOffset,
 		size:           f.size,
 		pieceSize:      pieceSize,
-		localPath:      localPath,
+		localPaths:     candidates,
 		pathErr:        pathErr,
 		api:            f.api,
 		pollInterval:   f.pollInterval,

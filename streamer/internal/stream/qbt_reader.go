@@ -31,8 +31,13 @@ type qbtReader struct {
 	pieceSize  int64
 	pos        int64
 
-	localPath string
-	pathErr   error // set at construction if path-mapping failed
+	// localPaths are candidate on-disk locations, tried in order (see
+	// qbtFile.NewReader — typically qBittorrent's download_path, i.e. its
+	// separate incomplete-files location if configured, before save_path,
+	// its final destination). Whichever is found to actually exist is used
+	// for the rest of this reader's lifetime.
+	localPaths []string
+	pathErr    error // set at construction if no candidate path could be mapped at all
 
 	api          qbtAPI
 	pollInterval time.Duration
@@ -57,6 +62,9 @@ type qbtReader struct {
 func (r *qbtReader) SetReadahead(int64) {}
 
 func (r *qbtReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
 	if r.pathErr != nil {
 		return 0, r.pathErr
 	}
@@ -73,7 +81,10 @@ func (r *qbtReader) Read(p []byte) (int, error) {
 
 	// Clamp so the returned slice never crosses into an unconfirmed piece —
 	// this is what guarantees no zero-filled preallocated bytes are ever served
-	// as real data.
+	// as real data. pieceEndLocal - r.pos is mathematically always > 0 here (pos
+	// is always strictly within [pieceIndex*pieceSize, pieceEndLocal) of its
+	// piece), so n cannot legitimately end up <= 0 given len(p) > 0 above — but
+	// clamp defensively rather than ever slicing p[:n] out of bounds.
 	n := int64(len(p))
 	if rem := r.size - r.pos; rem < n {
 		n = rem
@@ -82,7 +93,7 @@ func (r *qbtReader) Read(p []byte) (int, error) {
 		n = rem
 	}
 	if n <= 0 {
-		n = 1
+		return 0, nil
 	}
 
 	if pieceIndex != r.confirmedPiece {
@@ -104,13 +115,8 @@ func (r *qbtReader) Read(p []byte) (int, error) {
 	}
 
 	if r.f == nil {
-		f, err := os.Open(r.localPath)
+		f, err := r.openFirstExisting()
 		if err != nil {
-			if os.IsNotExist(err) {
-				// The piece is already confirmed downloaded (the loop above only
-				// breaks once it is), so a missing file here is unrecoverable.
-				return 0, ErrLocalFileMissing
-			}
 			return 0, err
 		}
 		r.f = f
@@ -122,6 +128,24 @@ func (r *qbtReader) Read(p []byte) (int, error) {
 		return got, err
 	}
 	return got, nil
+}
+
+// openFirstExisting tries each candidate path in order, returning the first
+// one that opens successfully. If none exist, the piece covering the current
+// position is already confirmed downloaded (Read only calls this after that),
+// so a missing file at every candidate is unrecoverable — ErrLocalFileMissing,
+// not a timing issue.
+func (r *qbtReader) openFirstExisting() (*os.File, error) {
+	for _, path := range r.localPaths {
+		f, err := os.Open(path)
+		if err == nil {
+			return f, nil
+		}
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	return nil, ErrLocalFileMissing
 }
 
 // pieceReady reports whether pieceIndex is fully downloaded. It fetches the full

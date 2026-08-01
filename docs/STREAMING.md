@@ -485,6 +485,21 @@ anyway (logged as a warning) rather than left downloading forever.
 - **Path mapping:** local path = `QBitDownloadDir + strings.TrimPrefix(SavePath,
   QBitRemoteRoot) + "/" + file.Name`. `SavePath` not prefixed by `QBitRemoteRoot` →
   explicit configuration error, not a silently wrong path.
+- **`download_path` vs. `save_path` (found in production, 2026-08-01):** qBittorrent
+  reports two possible locations — `save_path` (final destination) and, only when
+  "Keep incomplete torrents in a different folder" is enabled, a separate
+  `download_path` where files actually live while still downloading. The original
+  design only used `save_path`, which fails immediately (piece confirmed downloaded,
+  file not found at the mapped location → `ErrLocalFileMissing`) for any deployment
+  using that common qBittorrent option. Fixed: `qbtFile.NewReader` builds a candidate
+  path from `download_path` (if set) *and* `save_path`, both against the same
+  `QBitRemoteRoot`/`QBitDownloadDir` pair, and tries `download_path` first (more
+  likely correct for actively-streaming, not-yet-complete content). `qbtReader` tries
+  each candidate in order at open time, self-healing across the download→complete
+  transition since a fresh reader (each new HTTP range request) re-resolves from
+  scratch. Operator implication: `QBitRemoteRoot`/the bind mount need to cover
+  whichever of the two paths is relevant — ideally their common parent, so both
+  resolve correctly across a torrent's lifetime, not just one.
 - **Piece math:** at open time, `fileOffset = Σ(size of files before this index)`
   (from `GetFilesInformationCtx`, index order). For a read at file-relative offset
   `x`: `pieceIndex = (fileOffset + x) / PieceSize`.

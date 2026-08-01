@@ -58,7 +58,7 @@ func newTestReader(t *testing.T, fake *fakeQbtAPI, hash string, pieceSize, fileO
 	t.Helper()
 	return &qbtReader{
 		hash: hash, index: 0, fileOffset: fileOffset, size: size, pieceSize: pieceSize,
-		localPath: localPath, api: fake, pollInterval: 2 * time.Millisecond, confirmedPiece: -1,
+		localPaths: []string{localPath}, api: fake, pollInterval: 2 * time.Millisecond, confirmedPiece: -1,
 	}
 }
 

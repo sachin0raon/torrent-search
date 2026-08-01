@@ -4,6 +4,7 @@ import (
 	"encoding/base32"
 	"encoding/hex"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -107,6 +108,95 @@ func TestNewQBitClientWithAPI_PurgesExistingCategory(t *testing.T) {
 	}
 	if len(fake.deleteCalls) != 1 || len(fake.deleteCalls[0]) != 1 || fake.deleteCalls[0][0] != "orphan1" {
 		t.Errorf("expected purge to delete only orphan1, got %v", fake.deleteCalls)
+	}
+}
+
+// TestQbtFile_NewReader_TriesDownloadPathBeforeSavePath covers the exact
+// scenario that caused a real streaming failure: qBittorrent's "Keep
+// incomplete torrents in a different folder" option means a still-downloading
+// file physically lives under download_path, not save_path, even though
+// save_path is what most naive integrations assume is the only location.
+func TestQbtFile_NewReader_TriesDownloadPathBeforeSavePath(t *testing.T) {
+	fake := newFakeQbtAPI()
+	remoteRoot := "/data/downloads"
+	downloadDir := t.TempDir()
+
+	incompleteDir := filepath.Join(downloadDir, "incomplete", "Movie")
+	if err := os.MkdirAll(incompleteDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(incompleteDir, "a.mp4"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tor := &qbtTorrent{
+		hash: "zz", api: fake, downloadDir: downloadDir, remoteRoot: remoteRoot,
+		pollInterval: 2 * time.Millisecond, refcounts: make(map[int]int),
+		savePath:     "/data/downloads/Movie",            // final destination — file not there yet
+		downloadPath: "/data/downloads/incomplete/Movie", // where it actually is right now
+		pieceSize:    1024,
+	}
+	f := &qbtFile{
+		hash: "zz", index: 0, name: "a.mp4", size: 5,
+		api: fake, downloadDir: downloadDir, remoteRoot: remoteRoot,
+		pollInterval: 2 * time.Millisecond, torrent: tor,
+	}
+	fake.setPieceStates("zz", []qbt.PieceState{qbt.PieceStateAlreadyDownloaded})
+
+	r := f.NewReader()
+	defer r.Close()
+
+	buf := make([]byte, 5)
+	n, err := r.Read(buf)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if n != 5 || string(buf) != "hello" {
+		t.Errorf("Read = %d %q, want 5 bytes \"hello\"", n, buf)
+	}
+}
+
+// TestQbtFile_NewReader_FallsBackToSavePathOnceComplete covers the other half
+// of the same torrent's lifecycle: once complete, qBittorrent has moved the
+// file out of download_path into save_path, and a fresh reader (e.g. a later
+// request) must still find it there.
+func TestQbtFile_NewReader_FallsBackToSavePathOnceComplete(t *testing.T) {
+	fake := newFakeQbtAPI()
+	remoteRoot := "/data/downloads"
+	downloadDir := t.TempDir()
+
+	finalDir := filepath.Join(downloadDir, "Movie")
+	if err := os.MkdirAll(finalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(finalDir, "a.mp4"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tor := &qbtTorrent{
+		hash: "yy", api: fake, downloadDir: downloadDir, remoteRoot: remoteRoot,
+		pollInterval: 2 * time.Millisecond, refcounts: make(map[int]int),
+		savePath:     "/data/downloads/Movie",
+		downloadPath: "/data/downloads/incomplete/Movie", // no longer has the file
+		pieceSize:    1024,
+	}
+	f := &qbtFile{
+		hash: "yy", index: 0, name: "a.mp4", size: 5,
+		api: fake, downloadDir: downloadDir, remoteRoot: remoteRoot,
+		pollInterval: 2 * time.Millisecond, torrent: tor,
+	}
+	fake.setPieceStates("yy", []qbt.PieceState{qbt.PieceStateAlreadyDownloaded})
+
+	r := f.NewReader()
+	defer r.Close()
+
+	buf := make([]byte, 5)
+	n, err := r.Read(buf)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if n != 5 || string(buf) != "hello" {
+		t.Errorf("Read = %d %q, want 5 bytes \"hello\"", n, buf)
 	}
 }
 
