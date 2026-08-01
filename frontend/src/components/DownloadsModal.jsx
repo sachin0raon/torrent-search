@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, ChevronDown, ChevronUp, Trash2, PlayCircle, Download, Pause, Play } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Trash2, PlayCircle, Download, Pause, Play, RefreshCw } from 'lucide-react';
 import { downloader } from '../api/downloader.js';
 import { buildDownloadUrl, playerLinks, baseName } from '../playerLinks.js';
 import { fadeUp, spring, collapsePanel } from '../motion.js';
@@ -52,7 +52,7 @@ function DownloadFileRow({ hash, file }) {
 // check would never skip a re-render. Requires `onDelete` to be a stable
 // reference too (see DownloadsModal's useCallback below), or the comparator
 // would still see a "changed" prop on every poll.
-const DownloadCard = memo(function DownloadCard({ entry, onDelete }) {
+const DownloadCard = memo(function DownloadCard({ entry, onDelete, onRefresh }) {
   const { hash, name, state, progress, dlspeed } = entry;
   const [expanded, setExpanded] = useState(false);
   const [files, setFiles] = useState(null);
@@ -103,6 +103,7 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete }) {
     setPausing(true);
     try {
       await downloader.pauseDownload(hash);
+      await onRefresh();
     } finally {
       setPausing(false);
     }
@@ -112,6 +113,7 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete }) {
     setResuming(true);
     try {
       await downloader.resumeDownload(hash);
+      await onRefresh();
     } finally {
       setResuming(false);
     }
@@ -147,12 +149,12 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete }) {
         {!isDone && (
           isPaused ? (
             <button onClick={handleResume} disabled={resuming}>
-              <Play size={14} />
+              {resuming ? <RefreshCw size={14} style={{ animation: 'spin 0.7s linear infinite' }} /> : <Play size={14} />}
               Resume
             </button>
           ) : (
             <button onClick={handlePause} disabled={pausing}>
-              <Pause size={14} />
+              {pausing ? <RefreshCw size={14} style={{ animation: 'spin 0.7s linear infinite' }} /> : <Pause size={14} />}
               Pause
             </button>
           )
@@ -183,6 +185,7 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete }) {
   );
 }, (prev, next) =>
   prev.onDelete === next.onDelete &&
+  prev.onRefresh === next.onRefresh &&
   prev.entry.hash === next.entry.hash &&
   prev.entry.name === next.entry.name &&
   prev.entry.state === next.entry.state &&
@@ -195,28 +198,27 @@ export default function DownloadsModal({ onClose }) {
   const [error, setError] = useState(false);
   const activeRef = useRef(true);
 
+  const poll = useCallback(async () => {
+    try {
+      const list = await downloader.listDownloads();
+      if (activeRef.current) {
+        setDownloads(list || []);
+        setError(false);
+      }
+    } catch {
+      if (activeRef.current) setError(true);
+    }
+  }, []);
+
   useEffect(() => {
     activeRef.current = true;
-
-    async function poll() {
-      try {
-        const list = await downloader.listDownloads();
-        if (activeRef.current) {
-          setDownloads(list || []);
-          setError(false);
-        }
-      } catch {
-        if (activeRef.current) setError(true);
-      }
-    }
-
     poll();
     const id = setInterval(poll, POLL_INTERVAL);
     return () => {
       activeRef.current = false;
       clearInterval(id);
     };
-  }, []);
+  }, [poll]);
 
   // useCallback so DownloadCard's memo comparator (above) sees a stable
   // onDelete reference across polls — otherwise every poll's re-render of
@@ -263,7 +265,7 @@ export default function DownloadsModal({ onClose }) {
             <AnimatePresence initial={false}>
               {downloads.map((entry) => (
                 <motion.div key={entry.hash} variants={fadeUp} initial="initial" animate="animate" exit="exit" transition={spring}>
-                  <DownloadCard entry={entry} onDelete={handleDelete} />
+                  <DownloadCard entry={entry} onDelete={handleDelete} onRefresh={poll} />
                 </motion.div>
               ))}
             </AnimatePresence>

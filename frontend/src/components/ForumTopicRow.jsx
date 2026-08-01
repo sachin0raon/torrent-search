@@ -38,12 +38,12 @@ function ForumLinkRow({ link }) {
             <>
               <button onClick={toggleStream}>
                 <Zap size={13} />
-                {streamOpen ? 'Hide stream' : 'Stream'}
+                <span className="btn-label">{streamOpen ? 'Hide stream' : 'Stream'}</span>
               </button>
               {downloadsEnabled ? (
                 <button onClick={toggleDownload}>
                   <Download size={13} />
-                  {downloadOpen ? 'Hide download' : 'Download'}
+                  <span className="btn-label">{downloadOpen ? 'Hide download' : 'Download'}</span>
                 </button>
               ) : null}
               <CopyButton value={link.magnet} className="" />

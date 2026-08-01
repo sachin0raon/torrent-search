@@ -532,7 +532,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .player-btn { white-space: nowrap; }
 /* Downloads modal file row: Copy link / Download file shrink to icon-only
    so the row (3 player deep links + these two) fits on one line. */
-.player-btn.icon-only { padding: 7px; }
+.player-btn.icon-only { padding: 9px; }
 .player-btn.icon-only .btn-label { display: none; }
 
 /* ---- Modal ---- */
@@ -684,6 +684,11 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
      container's edge — drop the label and keep just the icon here. */
   .result-row .actions .btn-label,
   .forum-link-row .actions .btn-label { display: none; }
+
+  /* Once .btn-label is hidden the button contains only an icon — equal padding
+     makes it square so border-radius: 999px gives a true circle. */
+  .result-row .actions button:has(> .btn-label),
+  .forum-link-row .actions button:has(> .btn-label) { padding: 7px; }
 
   /* Downloads modal cards: Show files / Delete can overflow once "Delete"
      becomes the longer "Confirm delete?" label after the first tap. */
