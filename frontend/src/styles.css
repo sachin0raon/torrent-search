@@ -532,7 +532,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .player-btn { white-space: nowrap; }
 /* Downloads modal file row: Copy link / Download file shrink to icon-only
    so the row (3 player deep links + these two) fits on one line. */
-.player-btn.icon-only { padding: 9px; align-self: center; }
+.player-btn.icon-only { padding: 0; width: 34px; height: 34px; align-self: center; }
 .player-btn.icon-only .btn-label { display: none; }
 
 /* ---- Modal ---- */
@@ -685,10 +685,9 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   .result-row .actions .action-copy .btn-label,
   .forum-link-row .actions .action-copy .btn-label { display: none; }
 
-  /* Icon-only copy button: equal padding makes it square so
-     border-radius: 999px gives a true circle. */
+  /* Icon-only copy button: explicit equal dimensions guarantee a true circle. */
   .result-row .actions button.action-copy,
-  .forum-link-row .actions button.action-copy { padding: 7px; }
+  .forum-link-row .actions button.action-copy { padding: 0; width: 30px; height: 30px; }
 
   /* Downloads modal cards: Show files / Delete can overflow once "Delete"
      becomes the longer "Confirm delete?" label after the first tap. */
@@ -698,7 +697,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   .modal { padding: 18px; }
   .player-links { gap: 6px; }
   .player-btn { font-size: 13px; padding: 8px 14px; }
-  .player-btn.icon-only { padding: 9px; }
+  .player-btn.icon-only { padding: 0; width: 34px; height: 34px; }
 
   .scroll-top-btn { bottom: 16px; right: 16px; }
   .download-fab { bottom: 72px; right: 16px; }
