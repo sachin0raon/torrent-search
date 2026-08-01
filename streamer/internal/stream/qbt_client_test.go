@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -335,6 +336,38 @@ func TestQbtTorrent_DemoteNow_NoSelfCorrectWhenStillStale(t *testing.T) {
 	if len(calls) != 1 || calls[0].priority != 0 {
 		t.Errorf("expected only the demote call, got %v", calls)
 	}
+}
+
+func TestQbtTorrent_NotifyGone_FiresOnceEvenConcurrently(t *testing.T) {
+	tor := &qbtTorrent{hash: "mm", refcounts: make(map[int]int)}
+	var mu sync.Mutex
+	var calls int
+	tor.SetGoneCallback(func() {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+	})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tor.notifyGone()
+		}()
+	}
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Errorf("expected the gone-callback to fire exactly once, got %d", calls)
+	}
+}
+
+func TestQbtTorrent_NotifyGone_NoCallbackRegisteredIsSafe(t *testing.T) {
+	tor := &qbtTorrent{hash: "nn", refcounts: make(map[int]int)}
+	tor.notifyGone() // must not panic when no callback was ever registered
 }
 
 func TestQbtTorrent_PrioritizeFile_BoundedGracePeriod(t *testing.T) {

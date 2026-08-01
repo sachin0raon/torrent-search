@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -94,6 +95,7 @@ func TestQbtReader_WaitsForNotYetDownloadedPiece(t *testing.T) {
 	fake := newFakeQbtAPI()
 	const hash = "bb"
 	fake.setPieceStates(hash, []qbt.PieceState{qbt.PieceStateNowDownloading})
+	fake.torrents[hash] = qbt.Torrent{Hash: hash} // exists, normal state — not under test here
 
 	r := newTestReader(t, fake, hash, 1024, 0, 10, path)
 
@@ -133,6 +135,7 @@ func TestQbtReader_PieceStateBoundsSafety(t *testing.T) {
 	// qBittorrent reported PiecesNum > 0 before its piece-map was populated) —
 	// must not panic, must treat as not-ready.
 	fake.setPieceStates(hash, nil)
+	fake.torrents[hash] = qbt.Torrent{Hash: hash} // exists, normal state — not under test here
 
 	r := newTestReader(t, fake, hash, 1024, 0, 10, path)
 	done := make(chan struct{})
@@ -218,6 +221,153 @@ func TestQbtReader_ConfirmedPieceIsNotRePolled(t *testing.T) {
 
 	if calls := fake.getPieceStatesCallCount(); calls != 1 {
 		t.Errorf("expected 1 GetTorrentPieceStatesCtx call for repeated reads within an already-confirmed piece, got %d", calls)
+	}
+}
+
+func TestQbtReader_TorrentGoneStopsWaitingEventually(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.mp4")
+	if err := os.WriteFile(path, []byte("0123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := newFakeQbtAPI()
+	const hash = "jj"
+	// Piece never becomes ready — simulates the torrent having been deleted
+	// out-of-band (e.g. directly via qBittorrent's own UI) while a stream was
+	// waiting on it. fake.torrents has no entry for hash, so GetTorrentsCtx
+	// naturally returns an empty result, matching a deleted torrent.
+	fake.setPieceStates(hash, []qbt.PieceState{qbt.PieceStateNowDownloading})
+
+	r := newTestReader(t, fake, hash, 1024, 0, 10, path)
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.Read(make([]byte, 5))
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrTorrentGone) {
+			t.Fatalf("expected ErrTorrentGone, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read never returned — torrent-gone detection did not stop the wait loop")
+	}
+}
+
+func TestQbtReader_MissingFilesStateStopsWaitingEventually(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.mp4")
+	if err := os.WriteFile(path, []byte("0123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := newFakeQbtAPI()
+	const hash = "pp"
+	// The torrent entry still exists in qBittorrent, but qBittorrent itself has
+	// determined its files are gone from disk (manual deletion outside
+	// qBittorrent, an unmounted volume, a failed recheck, ...).
+	fake.setPieceStates(hash, []qbt.PieceState{qbt.PieceStateNowDownloading})
+	fake.torrents[hash] = qbt.Torrent{Hash: hash, State: qbt.TorrentStateMissingFiles}
+
+	r := newTestReader(t, fake, hash, 1024, 0, 10, path)
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.Read(make([]byte, 5))
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrTorrentGone) {
+			t.Fatalf("expected ErrTorrentGone, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read never returned for a torrent qBittorrent itself reports as missingFiles")
+	}
+}
+
+func TestQbtReader_TorrentGone_NotifiesTorrentCallback(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.mp4")
+	if err := os.WriteFile(path, []byte("0123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := newFakeQbtAPI()
+	const hash = "oo"
+	fake.setPieceStates(hash, []qbt.PieceState{qbt.PieceStateNowDownloading})
+
+	tor := &qbtTorrent{hash: hash, api: fake, refcounts: make(map[int]int)}
+	var mu sync.Mutex
+	var notified bool
+	tor.SetGoneCallback(func() {
+		mu.Lock()
+		notified = true
+		mu.Unlock()
+	})
+
+	r := newTestReader(t, fake, hash, 1024, 0, 10, path)
+	r.torrent = tor
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.Read(make([]byte, 5))
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrTorrentGone) {
+			t.Fatalf("expected ErrTorrentGone, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read never returned")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !notified {
+		t.Error("expected the torrent's gone-callback to be invoked so Manager can clean up bookkeeping")
+	}
+}
+
+func TestQbtReader_TransientPropsErrorDoesNotFalsePositiveGone(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.mp4")
+	if err := os.WriteFile(path, []byte("0123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := newFakeQbtAPI()
+	const hash = "kk"
+	fake.setPieceStates(hash, []qbt.PieceState{qbt.PieceStateNowDownloading})
+	fake.getTorrentsErr = errors.New("qbittorrent web api blip") // transient, not a real "not found"
+
+	r := newTestReader(t, fake, hash, 1024, 0, 10, path)
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.Read(make([]byte, 5))
+		done <- err
+	}()
+
+	// Give the existence check plenty of chances to (incorrectly) fire on the
+	// transient error before proving the piece really does resolve normally.
+	select {
+	case err := <-done:
+		t.Fatalf("Read returned early on a transient properties error: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	fake.setPieceStates(hash, []qbt.PieceState{qbt.PieceStateAlreadyDownloaded})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read did not recover once the piece became ready")
 	}
 }
 

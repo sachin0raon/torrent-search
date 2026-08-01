@@ -275,9 +275,23 @@ stream URL in a desktop player.
   directory is bind-mounted into the streamer container.
 - **Non-goals:** No change to HTTP handlers' existing behavior/shape, nginx,
   player-link building, the FastAPI/React layers, or default (anacrolix) behavior.
-  (Decision #20 adds one new case to `handlers.go`'s existing error-mapping `switch` —
-  additive, not a change to any documented case above.) No Docker Compose/Dockerfile
-  changes — qBittorrent's own deployment is out of scope here.
+  (`ErrLocalFileMissing`/`ErrTorrentGone`, both surfaced from `Reader.Read` rather
+  than `OpenFile`, don't get a clean mapped HTTP status the way `handlers.go`'s
+  existing `OpenFile`-error `switch` handles `ErrNotFound`/`ErrFileIndex` — see the
+  correction in §5.8 — but neither changes that switch's existing behavior either.)
+  No Docker Compose/Dockerfile changes — qBittorrent's own deployment is out of
+  scope here.
+- **Operational note — Cloudflare Tunnel / any reverse-proxy idle-timeout (found in
+  production, 2026-08-01):** if this deployment sits behind Cloudflare Tunnel (or
+  any CDN/tunnel/LB) rather than being reached directly, that layer's own idle-
+  connection timeout applies *in addition to* `nginx.conf`'s `/stream/` timeouts
+  (already generous — `proxy_read_timeout`/`proxy_send_timeout` `3600s`). Since the
+  qBittorrent-engine reader can go silent (no bytes written) for as long as the
+  current piece takes to download — which for large pieces can exceed such an
+  external timeout — the outer layer may kill the connection first, regardless of
+  nginx's own config, producing repeated client-side reconnect attempts. This is a
+  deployment/infra consideration outside this repo's control, not something fixable
+  via `nginx.conf`.
 - **Accepted risk (extended, Decision #19):** §3's "fully open, no auth" accepted
   risk was scoped to bandwidth/abuse. The bind-mount this design relies on widens
   that to filesystem exposure — the streamer container gets read access to
@@ -503,6 +517,27 @@ anyway (logged as a warning) rather than left downloading forever.
 - **Piece math:** at open time, `fileOffset = Σ(size of files before this index)`
   (from `GetFilesInformationCtx`, index order). For a read at file-relative offset
   `x`: `pieceIndex = (fileOffset + x) / PieceSize`.
+- **Known limitation — whole-piece-only granularity (found in production,
+  2026-08-01):** qBittorrent's Web API only reports piece state as a whole
+  (`GetTorrentPieceStatesCtx` — downloaded or not), with no visibility into
+  partial progress *within* a piece. The reader can therefore only unblock the
+  player once an entire piece is fully downloaded and hash-verified, unlike
+  anacrolix's `SetResponsive()` reader, which has direct in-process access to
+  block-level state and can surface data in much smaller increments. For
+  torrents with large pieces (e.g. 16 MiB, seen on a 22.5 GiB multi-file
+  release), this can mean multi-second pauses between chunks, compounded by
+  normal cold-start peer-availability variance for the very first piece —
+  producing a noticeably chunkier playback start than the anacrolix engine on
+  the same content. **Decision (accepted, no code change):** keep strict
+  verified-only reads — never serve a piece before qBittorrent's own hash
+  check confirms it — rather than peeking at on-disk bytes ahead of
+  verification to reduce latency. The alternative (reading ahead of
+  verification) would reduce start-up latency on large-piece torrents at the
+  cost of occasionally serving bytes that later fail the hash check and get
+  re-downloaded — a correctness/latency trade-off explicitly rejected in favor
+  of the guarantee established in §5.8's read-clamping design (no unverified
+  data ever reaches the player). Small/typical piece sizes (1–4 MiB, the
+  common case) are largely unaffected.
 - **Read:** clamp the returned length to never cross into an unconfirmed piece
   (`n = min(len(p), pieceEndByte - offset)`) — guarantees no zero-filled
   preallocated bytes are ever served as real data. Check a cached piece-state slice
@@ -514,6 +549,55 @@ anyway (logged as a warning) rather than left downloading forever.
   API error during this poll is treated as transient and retried on the next tick,
   consistent with Decision #15's precedent for the metadata poller — not a hard
   failure of the read.
+- **Torrent deleted out-of-band (found in production, 2026-08-01):** treating every
+  `GetTorrentPieceStatesCtx` error/not-ready result as transient (above) has a gap —
+  if the torrent is deleted directly via qBittorrent's own UI (not through this app)
+  while a reader is waiting on one of its pieces, it will never become "ready," and
+  qBittorrent's piece-states endpoint doesn't reliably distinguish "not found" from
+  "not ready yet" the way its properties endpoint does (`ErrTorrentNotFound`, a 404).
+  Left unhandled, this retries forever. Fixed: every `existenceCheckEvery` (10) wait
+  iterations, `Read` additionally calls `GetTorrentPropertiesCtx` and bails out with
+  `ErrTorrentGone` if it gets back `ErrTorrentNotFound` specifically — any other error
+  from that check is treated as inconclusive (assume it still exists), so a transient
+  blip can't produce a false-positive abort. **Known residual limitation:** by the
+  time this fires, `http.ServeContent` has already committed response headers/status
+  (200/206) — same constraint that applies to `ErrLocalFileMissing` above, correcting
+  an overstatement in the original Decision #20 write-up, which implied a clean
+  mapped HTTP error response for both. In practice the connection is aborted (same
+  class of symptom as any other mid-stream `Read` error), not resolved into a clean
+  status code — but bailing out within a bounded ~`QBitPollInterval` × 10 window is a
+  substantial improvement over an indefinite hang.
+- **Bookkeeping cleanup on detection (found in production, 2026-08-01, follow-up):**
+  detecting `ErrTorrentGone` inside `Read` only fixed the hang for *that* request —
+  `Manager`'s own session bookkeeping had no idea anything was wrong, so a *retry* of
+  the same session ID would repeat the identical ~10s detect-then-abort cycle rather
+  than getting the existing clean `410 Gone` → "Restart stream" flow (which already
+  exists for the *different* case of `Manager`'s own idle-GC removing a session).
+  Fixed via a new optional interface, mirroring the `filePrioritizer`/`peerAdder`
+  pattern: `goneNotifiable interface{ SetGoneCallback(func()) }`. `Manager.AddSession`
+  wires `qbtTorrent`'s callback to `m.remove(s)` right after registering the session;
+  `qbtReader.Read`, on detecting the torrent is gone, calls `torrent.notifyGone()`
+  (guarded by `sync.Once` so concurrent in-flight requests don't double-invoke it)
+  before returning `ErrTorrentGone`. Reuses the existing `Drop()`/cleanup path rather
+  than a parallel one — safe because qBittorrent's `torrents/delete` endpoint is
+  idempotent (`200 OK` even for an already-unknown hash, confirmed against the
+  vendored client's implementation), so `Drop()` on an already-gone torrent succeeds
+  cleanly rather than landing in the `pendingRemoval` retry list (Decision #17) forever.
+- **`missingFiles` state (found in production, 2026-08-01, second follow-up):**
+  `torrentExists` originally only checked "does the torrent entry exist at all"
+  (`GetTorrentPropertiesCtx` + `ErrTorrentNotFound`) — it missed the case where the
+  torrent entry still exists in qBittorrent but qBittorrent itself has determined the
+  files are gone from disk (manual deletion outside qBittorrent, an unmounted volume,
+  a failed recheck). In that case the piece the reader is waiting on would never
+  become ready, and the old check would report "still exists," so the wait loop would
+  never trigger `ErrTorrentGone`. Fixed by switching the check to `GetTorrentsCtx`
+  (filtered by hash), which exposes `.State`: empty result → deleted entirely (same
+  as before, just via a different endpoint call); `State == qbt.TorrentStateMissingFiles`
+  → also treated as gone. Deliberately uses qBittorrent's own state rather than an
+  independent disk-existence check on our side — an independent check would risk
+  reintroducing the exact false-positive `ErrLocalFileMissing` was designed to avoid
+  (a file not existing *yet* is normal mid-download; only qBittorrent's own piece/file
+  tracking can reliably tell that apart from genuinely gone).
 - **Lazy open, `ENOENT`-tolerant (Decision #13):** the underlying file is opened lazily
   on first read, not at construction. qBittorrent doesn't preallocate files by default,
   so a missing file on a freshly-added torrent is treated as "not ready yet" (sleep
@@ -577,8 +661,15 @@ qbittorrent-engine container are both live against the same qBittorrent instance
   ticks (Decision #17, injected fake clock + a fake client that fails then succeeds);
   `NewQBitClient` failing fast when `QBitDownloadDir` doesn't exist/isn't readable, and
   the reader returning the distinct sentinel error (rather than retrying forever) when
-  a piece is reported downloaded but the local file still can't be opened, mapped
-  through `handlers.go`'s error switch to a diagnosable response (Decision #20).
+  a piece is reported downloaded but the local file still can't be opened (Decision
+  #20); `download_path`-before-`save_path` candidate ordering and the fallback across
+  a torrent's download→complete transition (found in production, 2026-08-01); and the
+  bounded existence-check that returns `ErrTorrentGone` when a torrent was deleted
+  out-of-band, verified to *not* false-positive on a merely transient properties-check
+  error (also found in production, 2026-08-01); and the `goneNotifiable` callback
+  firing exactly once even under concurrent triggers, being a safe no-op when nothing
+  registered one, and `Manager.AddSession` actually wiring it such that invoking it
+  removes the session from bookkeeping (follow-up, 2026-08-01).
 - **Safety-invariant test (Decision #12):** assert `QBitPeerSource` is never
   constructed when `cfg.Engine == "qbittorrent"`, and that its delete-probe path
   skips deletion (with a fake client) when the target torrent's category matches

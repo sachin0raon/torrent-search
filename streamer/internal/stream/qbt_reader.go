@@ -20,6 +20,20 @@ import (
 // downloaded.
 var ErrLocalFileMissing = errors.New("qbt: piece reported downloaded but local file is missing (check STREAM_QBIT_REMOTE_ROOT / STREAM_QBIT_DOWNLOAD_DIR)")
 
+// ErrTorrentGone is returned when the underlying qBittorrent torrent no longer
+// exists — e.g. deleted directly via qBittorrent's own UI, out-of-band from
+// this app. Without this check, a gone torrent is indistinguishable from a
+// slow one (qBittorrent's piece-states endpoint doesn't reliably signal "not
+// found" the way its properties endpoint does), and the wait loop in Read
+// would retry forever instead of ever resolving.
+var ErrTorrentGone = errors.New("qbt: torrent no longer exists in qBittorrent")
+
+// existenceCheckEvery bounds how often Read's wait loop verifies the torrent
+// still exists (a GetTorrentPropertiesCtx call), independent of pieceReady's
+// own success/failure — catches an out-of-band deletion within a bounded
+// number of poll iterations rather than looping indefinitely.
+const existenceCheckEvery = 10
+
 // qbtReader is the piece-aware Reader for the qBittorrent engine: it reads
 // directly off disk from qBittorrent's download directory, blocking until the
 // piece covering the current read position is confirmed downloaded (§5.8).
@@ -97,17 +111,28 @@ func (r *qbtReader) Read(p []byte) (int, error) {
 	}
 
 	if pieceIndex != r.confirmedPiece {
-		for {
+		for iter := 0; ; iter++ {
 			ready, err := r.pieceReady(pieceIndex)
-			if err != nil {
-				// Transient API error — keep polling rather than failing the
-				// read, consistent with the metadata poller's precedent
-				// (Decision #15).
-				time.Sleep(r.pollInterval)
-				continue
-			}
-			if ready {
+			if err == nil && ready {
 				break
+			}
+			// Neither an error nor "not ready" is distinguishable on its own
+			// from "this torrent was deleted out-of-band" (e.g. directly via
+			// qBittorrent's own UI, not through this app) — qBittorrent's
+			// piece-states endpoint doesn't reliably signal "not found" the
+			// way its properties endpoint does. Left unchecked, that would
+			// retry forever, since a gone torrent never becomes "ready."
+			// Periodically (not every iteration, to bound the extra API
+			// calls) verify the torrent still exists and bail out if not.
+			if iter > 0 && iter%existenceCheckEvery == 0 && !r.torrentExists() {
+				// Let Manager clean up its own bookkeeping immediately, so a
+				// subsequent request for this session gets the existing clean
+				// 410 Gone / "Restart stream" flow instead of repeating this
+				// same detect-then-fail cycle.
+				if r.torrent != nil {
+					r.torrent.notifyGone()
+				}
+				return 0, ErrTorrentGone
 			}
 			time.Sleep(r.pollInterval)
 		}
@@ -128,6 +153,32 @@ func (r *qbtReader) Read(p []byte) (int, error) {
 		return got, err
 	}
 	return got, nil
+}
+
+// torrentExists checks whether the torrent still exists in qBittorrent *and*
+// still has its files, returning false for either a definitive "not found"
+// (deleted entirely) or qBittorrent's own missingFiles state (the torrent
+// entry persists, but qBittorrent itself has determined its files are gone
+// from disk — e.g. manual deletion outside qBittorrent, an unmounted volume,
+// or a failed recheck). Using qBittorrent's own signal here rather than an
+// independent disk check on our side avoids reintroducing the false-positive
+// risk ErrLocalFileMissing's design already had to guard against: a file not
+// existing *yet* is normal mid-download, and only qBittorrent's own piece/file
+// tracking can reliably distinguish that from genuinely gone. Any error making
+// this check (network blip, timeout) is treated as inconclusive — assume the
+// torrent still exists — so a transient failure can never produce a
+// false-positive "gone" verdict and abort a stream that would have recovered.
+func (r *qbtReader) torrentExists() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+	torrents, err := r.api.GetTorrentsCtx(ctx, qbt.TorrentFilterOptions{Hashes: []string{r.hash}})
+	if err != nil {
+		return true
+	}
+	if len(torrents) == 0 {
+		return false
+	}
+	return torrents[0].State != qbt.TorrentStateMissingFiles
 }
 
 // openFirstExisting tries each candidate path in order, returning the first

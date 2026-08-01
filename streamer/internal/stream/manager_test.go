@@ -359,6 +359,54 @@ func TestOpenFile_NonPrioritizingEngineUnaffected(t *testing.T) {
 	_ = r.Close()
 }
 
+// fakeGoneNotifiableTorrent additionally implements goneNotifiable, simulating
+// the qBittorrent engine's out-of-band-deletion detection.
+type fakeGoneNotifiableTorrent struct {
+	fakeTorrent
+	mu       sync.Mutex
+	callback func()
+}
+
+func (t *fakeGoneNotifiableTorrent) SetGoneCallback(fn func()) {
+	t.mu.Lock()
+	t.callback = fn
+	t.mu.Unlock()
+}
+
+func (t *fakeGoneNotifiableTorrent) triggerGone() {
+	t.mu.Lock()
+	fn := t.callback
+	t.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+type fakeGoneNotifiableClient struct{ t *fakeGoneNotifiableTorrent }
+
+func (c *fakeGoneNotifiableClient) AddMagnet(uri string) (Torrent, error) { return c.t, nil }
+func (c *fakeGoneNotifiableClient) Close()                                {}
+
+func TestAddSession_WiresGoneCallback(t *testing.T) {
+	tor := &fakeGoneNotifiableTorrent{fakeTorrent: fakeTorrent{
+		infohash: "AAA", name: "M", gotInfo: closedChan(),
+		files: []TorrentFile{&fakeFile{path: "a.mp4", data: []byte("x")}},
+	}}
+	mgr := NewManager(testConfig(t), &fakeGoneNotifiableClient{t: tor})
+	defer mgr.Close()
+
+	s, err := mgr.AddSession(context.Background(), "magnet:?xt=urn:btih:AAA")
+	if err != nil {
+		t.Fatalf("AddSession: %v", err)
+	}
+
+	tor.triggerGone()
+
+	if _, ok := mgr.Get(s.ID); ok {
+		t.Error("session should be removed from bookkeeping after the gone-callback fires")
+	}
+}
+
 func TestRemove(t *testing.T) {
 	mgr := NewManager(testConfig(t), newFakeClient(readyTorrent("M", &fakeFile{path: "a.mp4", data: []byte("x")})))
 	defer mgr.Close()

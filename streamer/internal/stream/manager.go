@@ -181,6 +181,16 @@ func (m *Manager) AddSession(ctx context.Context, magnet string) (*Session, erro
 	m.byInfohash[ih] = s.ID
 	m.mu.Unlock()
 
+	// Engines that can detect their underlying torrent was deleted out-of-band
+	// (e.g. the qBittorrent engine, directly via qBittorrent's own UI, not
+	// through this app) implement this optional interface so Manager's own
+	// bookkeeping gets cleaned up immediately — otherwise a subsequent request
+	// for this session would repeat the same detect-then-fail cycle instead of
+	// getting the existing clean 410 Gone / "Restart stream" flow.
+	if gn, ok := s.t.(goneNotifiable); ok {
+		gn.SetGoneCallback(func() { m.remove(s) })
+	}
+
 	// Widen peer discovery before waiting for metadata, so the extra trackers
 	// help fetch the info dict too.
 	m.addTrackers(s)
@@ -374,6 +384,12 @@ func (m *Manager) OpenFile(id string, index int) (Reader, FileInfo, error) {
 // filePrioritizer is implemented by engines that can steer download priority
 // toward a single file within a multi-file torrent (season packs).
 type filePrioritizer interface{ PrioritizeFile(index int) }
+
+// goneNotifiable is implemented by engines that can detect their underlying
+// torrent was deleted out-of-band and want Manager to clean up bookkeeping
+// for it immediately rather than waiting for a subsequent request to hit the
+// same failure again.
+type goneNotifiable interface{ SetGoneCallback(func()) }
 
 // touchReader wraps a Reader and pings onRead whenever bytes are read, so an
 // active stream keeps its session's idle timer fresh for its whole duration.

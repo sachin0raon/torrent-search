@@ -210,6 +210,9 @@ type qbtTorrent struct {
 	gotInfo     chan struct{}
 	gotInfoOnce sync.Once
 
+	goneCallback func()
+	goneOnce     sync.Once
+
 	mu             sync.Mutex
 	name           string
 	savePath       string
@@ -219,6 +222,28 @@ type qbtTorrent struct {
 	prioritized    int
 	hasPrioritized bool
 	refcounts      map[int]int
+}
+
+// SetGoneCallback implements goneNotifiable: Manager registers a callback
+// (wired to remove this torrent's session from its own bookkeeping) right
+// after creating the session.
+func (t *qbtTorrent) SetGoneCallback(fn func()) {
+	t.mu.Lock()
+	t.goneCallback = fn
+	t.mu.Unlock()
+}
+
+// notifyGone invokes the registered gone-callback exactly once, even if
+// called from multiple concurrent readers (e.g. several in-flight range
+// requests all detecting the torrent is gone around the same time).
+func (t *qbtTorrent) notifyGone() {
+	t.mu.Lock()
+	fn := t.goneCallback
+	t.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	t.goneOnce.Do(fn)
 }
 
 // pollMetadata polls qBittorrent until the torrent's metadata (file list, piece
