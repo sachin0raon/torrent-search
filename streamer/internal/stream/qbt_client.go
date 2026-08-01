@@ -520,39 +520,46 @@ func (f *qbtFile) BytesCompleted() int64 {
 	return int64(float64(f.progress) * float64(f.size))
 }
 
+// candidatePaths builds the ordered list of on-disk locations a file might be
+// found at, mapped through the remoteRoot/downloadDir bind-mount prefix.
+// qBittorrent reports two possible locations: save_path (the final
+// destination) and download_path (a separate temp location used only while
+// "Keep incomplete torrents in a different folder" is enabled). A file still
+// downloading physically lives under download_path in that case, not
+// save_path — so it's tried first, since callers generally want the
+// currently-relevant (often not-yet-complete) location, then falls back to
+// save_path. Only a root that doesn't share remoteRoot's prefix is dropped; a
+// root can still be a valid candidate even if the file isn't there *yet*
+// (Read's ENOENT handling distinguishes "not ready" from "confirmed
+// downloaded but truly missing" per-piece — see qbt_reader.go). Shared by both
+// the streaming (qbtReader) and download-manager (downloadReader) paths.
+func candidatePaths(remoteRoot, downloadDir, savePath, downloadPath, fileName string) ([]string, error) {
+	var candidates []string
+	var lastErr error
+	if downloadPath != "" {
+		if p, err := mapPath(downloadPath, remoteRoot, downloadDir); err == nil {
+			candidates = append(candidates, filepath.Join(p, fileName))
+		} else {
+			lastErr = err
+		}
+	}
+	if p, err := mapPath(savePath, remoteRoot, downloadDir); err == nil {
+		candidates = append(candidates, filepath.Join(p, fileName))
+	} else {
+		lastErr = err
+	}
+	if len(candidates) == 0 {
+		return nil, lastErr
+	}
+	return candidates, nil
+}
+
 func (f *qbtFile) NewReader() Reader {
 	f.torrent.mu.Lock()
 	savePath, downloadPath, pieceSize := f.torrent.savePath, f.torrent.downloadPath, f.torrent.pieceSize
 	f.torrent.mu.Unlock()
 
-	// qBittorrent reports two possible locations: save_path (the final
-	// destination) and download_path (a separate temp location used only while
-	// "Keep incomplete torrents in a different folder" is enabled). A file
-	// still downloading physically lives under download_path in that case, not
-	// save_path — so try it first, since NewReader is generally called on
-	// actively-streaming (often not-yet-complete) content, then fall back to
-	// save_path. Only a root that doesn't share remoteRoot's prefix is dropped;
-	// a root can still be a valid candidate even if the file isn't there *yet*
-	// (Read's ENOENT handling distinguishes "not ready" from "confirmed
-	// downloaded but truly missing" per-piece — see qbt_reader.go).
-	var candidates []string
-	var lastErr error
-	if downloadPath != "" {
-		if p, err := mapPath(downloadPath, f.remoteRoot, f.downloadDir); err == nil {
-			candidates = append(candidates, filepath.Join(p, f.name))
-		} else {
-			lastErr = err
-		}
-	}
-	if p, err := mapPath(savePath, f.remoteRoot, f.downloadDir); err == nil {
-		candidates = append(candidates, filepath.Join(p, f.name))
-	} else {
-		lastErr = err
-	}
-	var pathErr error
-	if len(candidates) == 0 {
-		pathErr = lastErr
-	}
+	candidates, pathErr := candidatePaths(f.remoteRoot, f.downloadDir, savePath, downloadPath, f.name)
 
 	f.torrent.acquireReader(f.index)
 	return &qbtReader{

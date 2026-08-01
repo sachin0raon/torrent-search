@@ -142,6 +142,13 @@ func (f *fakeQbtAPI) AddTrackersCtx(ctx context.Context, hash string, urls strin
 	return nil
 }
 
+// GetTorrentPeersCtx is only here so fakeQbtAPI also satisfies qbtPeerAPI
+// (qbt_peers.go) — no test currently exercises real peer data, so this
+// always returns an empty response.
+func (f *fakeQbtAPI) GetTorrentPeersCtx(ctx context.Context, hash string, rid int64) (*qbt.TorrentPeersResponse, error) {
+	return &qbt.TorrentPeersResponse{}, nil
+}
+
 func (f *fakeQbtAPI) DeleteTorrentsCtx(ctx context.Context, hashes []string, deleteFiles bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

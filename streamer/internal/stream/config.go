@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -64,6 +65,15 @@ type Config struct {
 	// QBitPollInterval is how often the qbittorrent engine polls for
 	// metadata-readiness and piece-state.
 	QBitPollInterval time.Duration
+
+	// DownloadEngine enables the persistent download-manager feature when set
+	// to "qbittorrent". Empty (default) means the feature is entirely absent.
+	// Independent of Engine — see docs/STREAMING.md §6.
+	DownloadEngine string
+	// DownloadQBitCategory tags torrents the download-manager feature adds.
+	// Unlike QBitCategory, this is never purged on startup: downloads are
+	// intentionally persistent (Decision #22).
+	DownloadQBitCategory string
 }
 
 // LoadConfig reads configuration from the environment, applying defaults for
@@ -90,7 +100,23 @@ func LoadConfig() Config {
 		QBitDownloadDir:  envStr("STREAM_QBIT_DOWNLOAD_DIR", ""),
 		QBitCategory:     envStr("STREAM_QBIT_CATEGORY", "tsa-stream-engine"),
 		QBitPollInterval: envSeconds("STREAM_QBIT_POLL_INTERVAL", 1),
+
+		DownloadEngine:       envStr("DOWNLOAD_ENGINE", ""),
+		DownloadQBitCategory: envStr("DOWNLOAD_QBIT_CATEGORY", "tsa-download"),
 	}
+}
+
+// ValidateEngines rejects invalid combinations of Engine and DownloadEngine.
+// STREAM_ENGINE=qbittorrent and DOWNLOAD_ENGINE=qbittorrent can never both be
+// active in the same process (docs/STREAMING.md §6 Decision #25): nothing in
+// the design needs two qBittorrent-backed engines against the same instance,
+// and allowing it would add a permanently-live edge case for no functional
+// benefit. Pure/no I/O so it can run before any network call.
+func (c Config) ValidateEngines() error {
+	if c.Engine == "qbittorrent" && c.DownloadEngine == "qbittorrent" {
+		return fmt.Errorf("STREAM_ENGINE=qbittorrent and DOWNLOAD_ENGINE=qbittorrent cannot both be enabled — use STREAM_ENGINE=anacrolix with DOWNLOAD_ENGINE=qbittorrent instead")
+	}
+	return nil
 }
 
 // trackerURLs resolves STREAM_TRACKERS_URLS. Unset or empty → the built-in

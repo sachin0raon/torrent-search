@@ -42,7 +42,15 @@ func buildClient(cfg stream.Config) (stream.TorrentClient, *stream.QBitPeerSourc
 
 	var qbit *stream.QBitPeerSource
 	if cfg.QBitHost != "" {
-		qbit, err = stream.NewQBitPeerSource(cfg.QBitHost, cfg.QBitUser, cfg.QBitPass, cfg.QBitCategory)
+		// Protect both the streaming engine's category (only relevant during a
+		// redeploy overlap, since this branch only runs when cfg.Engine !=
+		// "qbittorrent") and the download manager's, if configured — see
+		// docs/STREAMING.md §6 Decision #24.
+		protected := []string{cfg.QBitCategory}
+		if cfg.DownloadEngine == "qbittorrent" {
+			protected = append(protected, cfg.DownloadQBitCategory)
+		}
+		qbit, err = stream.NewQBitPeerSource(cfg.QBitHost, cfg.QBitUser, cfg.QBitPass, protected)
 		if err != nil {
 			log.Printf("streamer: qbit peer source unavailable: %v (peer injection disabled)", err)
 			qbit = nil
@@ -51,12 +59,34 @@ func buildClient(cfg stream.Config) (stream.TorrentClient, *stream.QBitPeerSourc
 	return client, qbit, nil
 }
 
+// buildDownloadManager constructs the persistent download-manager feature
+// (docs/STREAMING.md §6) when DOWNLOAD_ENGINE=qbittorrent, independently of
+// buildClient's STREAM_ENGINE switch — the two are mutually exclusive at the
+// "qbittorrent" value (enforced by Config.ValidateEngines, Decision #25) but
+// otherwise unrelated. Returns nil, nil when the feature is off.
+func buildDownloadManager(cfg stream.Config) (*stream.DownloadManager, error) {
+	if cfg.DownloadEngine != "qbittorrent" {
+		return nil, nil
+	}
+	return stream.NewDownloadManager(cfg.QBitHost, cfg.QBitUser, cfg.QBitPass,
+		cfg.QBitRemoteRoot, cfg.QBitDownloadDir, cfg.DownloadQBitCategory, cfg.QBitPollInterval)
+}
+
 func main() {
 	cfg := stream.LoadConfig()
+
+	if err := cfg.ValidateEngines(); err != nil {
+		log.Fatalf("streamer: %v", err)
+	}
 
 	client, qbit, err := buildClient(cfg)
 	if err != nil {
 		log.Fatalf("streamer: failed to start torrent client: %v", err)
+	}
+
+	downloadMgr, err := buildDownloadManager(cfg)
+	if err != nil {
+		log.Fatalf("streamer: download engine unavailable: %v", err)
 	}
 
 	mgr := stream.NewManager(cfg, client)
@@ -86,9 +116,15 @@ func main() {
 		mgr.SetTrackerProvider(trackers)
 	}
 
+	handler := stream.NewHandler(mgr, cfg)
+	if downloadMgr != nil {
+		handler.SetDownloadManager(downloadMgr)
+		log.Printf("streamer: download manager enabled (category=%s)", cfg.DownloadQBitCategory)
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           stream.NewHandler(mgr, cfg).Routes(),
+		Handler:           handler.Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

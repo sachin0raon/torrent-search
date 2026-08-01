@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useSessions } from './sessionContext.jsx';
+import { useDownloadsEnabled } from './downloadCapabilityContext.jsx';
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
+import { HardDriveDownload } from 'lucide-react';
 import { api } from './api/client.js';
 import * as clientTorrentio from './api/torrentio.js';
 import * as clientComet from './api/comet.js';
@@ -16,6 +18,7 @@ import SeasonEpisodePicker from './components/SeasonEpisodePicker.jsx';
 import ResultTabs from './components/ResultTabs.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import StatsModal from './components/StatsModal.jsx';
+import DownloadsModal from './components/DownloadsModal.jsx';
 import Toast from './components/Toast.jsx';
 import ScrollToTopButton from './components/ScrollToTopButton.jsx';
 import { fadeUp, spring } from './motion.js';
@@ -45,6 +48,8 @@ export default function App() {
   const [info, setInfo] = useState(''); // non-error notice (e.g. forum URL auto-updated)
   const [showSettings, setShowSettings] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  const [showDownloads, setShowDownloads] = useState(false);
+  const downloadsEnabled = useDownloadsEnabled();
   const [forumOnly, setForumOnly] = useState(false); // forum-only search (no TMDB title)
   const [tmdbFailed, setTmdbFailed] = useState(false); // last title search errored
   const [discoverActive, setDiscoverActive] = useState(getActiveDiscoverBadge); // active Discover badge key, or null
@@ -272,6 +277,16 @@ export default function App() {
     <MotionConfig reducedMotion="user">
       <div className="container">
         <header className="app-header">
+          {downloadsEnabled ? (
+            <button
+              className="icon-btn"
+              onClick={() => setShowDownloads(true)}
+              aria-label="Downloads"
+              title="Downloads"
+            >
+              <HardDriveDownload />
+            </button>
+          ) : null}
           <button
             className="icon-btn"
             onClick={() => setShowSettings(true)}
@@ -415,6 +430,9 @@ export default function App() {
           ) : null}
           {showStats ? (
             <StatsModal onClose={() => setShowStats(false)} />
+          ) : null}
+          {showDownloads ? (
+            <DownloadsModal onClose={() => setShowDownloads(false)} />
           ) : null}
         </AnimatePresence>
       </div>

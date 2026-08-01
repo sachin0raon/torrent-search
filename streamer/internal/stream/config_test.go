@@ -56,6 +56,44 @@ func TestLoadConfig_QBitEngineDefaults(t *testing.T) {
 	}
 }
 
+func TestValidateEngines(t *testing.T) {
+	tests := []struct {
+		name           string
+		engine         string
+		downloadEngine string
+		wantErr        bool
+	}{
+		{"both unset", "", "", false},
+		{"anacrolix + download qbittorrent (the typical case)", "anacrolix", "qbittorrent", false},
+		{"stream qbittorrent, download unset", "qbittorrent", "", false},
+		{"both qbittorrent is rejected", "qbittorrent", "qbittorrent", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{Engine: tc.engine, DownloadEngine: tc.downloadEngine}
+			err := cfg.ValidateEngines()
+			if tc.wantErr && err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_DownloadEngineDefaults(t *testing.T) {
+	t.Setenv("DOWNLOAD_ENGINE", "")
+	t.Setenv("DOWNLOAD_QBIT_CATEGORY", "")
+	cfg := LoadConfig()
+	if cfg.DownloadEngine != "" {
+		t.Errorf("DownloadEngine default = %q, want empty", cfg.DownloadEngine)
+	}
+	if cfg.DownloadQBitCategory != "tsa-download" {
+		t.Errorf("DownloadQBitCategory default = %q, want %q", cfg.DownloadQBitCategory, "tsa-download")
+	}
+}
+
 func TestLoadConfig_QBitEngineExplicit(t *testing.T) {
 	t.Setenv("STREAM_ENGINE", "qbittorrent")
 	t.Setenv("STREAM_QBIT_REMOTE_ROOT", "/data/downloads")

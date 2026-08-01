@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { RefreshCw, Zap } from 'lucide-react';
+import { RefreshCw, Zap, Download } from 'lucide-react';
 import CopyButton from './CopyButton.jsx';
 import StreamPanel from './StreamPanel.jsx';
+import DownloadPanel from './DownloadPanel.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
 import ForumTopicRow from './ForumTopicRow.jsx';
+import { useDownloadsEnabled } from '../downloadCapabilityContext.jsx';
 import { spring, staggerContainer, staggerItem, collapsePanel } from '../motion.js';
 
 // Torrent sources (Comet/Meteor/Torrentio) share this row shape once parsed;
@@ -69,6 +71,18 @@ function renderSourceState(result, sourceLabel, onRetry, dismissed, onDismiss) {
 
 function TorrentRow({ item }) {
   const [streamOpen, setStreamOpen] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const downloadsEnabled = useDownloadsEnabled();
+
+  function toggleStream() {
+    setDownloadOpen(false);
+    setStreamOpen((o) => !o);
+  }
+  function toggleDownload() {
+    setStreamOpen(false);
+    setDownloadOpen((o) => !o);
+  }
+
   return (
     <motion.div className="result-row" variants={staggerItem} whileHover={{ y: -2 }}>
       <div className="row-main">
@@ -81,10 +95,16 @@ function TorrentRow({ item }) {
           </div>
         </div>
         <div className="actions">
-          <button onClick={() => setStreamOpen((o) => !o)} disabled={!item.magnet}>
+          <button onClick={toggleStream} disabled={!item.magnet}>
             <Zap size={13} />
             {streamOpen ? 'Hide stream' : 'Stream'}
           </button>
+          {downloadsEnabled ? (
+            <button onClick={toggleDownload} disabled={!item.magnet}>
+              <Download size={13} />
+              {downloadOpen ? 'Hide download' : 'Download'}
+            </button>
+          ) : null}
           <CopyButton value={item.magnet} className="" />
         </div>
       </div>
@@ -92,6 +112,11 @@ function TorrentRow({ item }) {
         {streamOpen && (
           <motion.div key="stream" {...collapsePanel} style={{ overflow: 'hidden' }}>
             <StreamPanel magnet={item.magnet} />
+          </motion.div>
+        )}
+        {downloadOpen && (
+          <motion.div key="download" {...collapsePanel} style={{ overflow: 'hidden' }}>
+            <DownloadPanel magnet={item.magnet} />
           </motion.div>
         )}
       </AnimatePresence>

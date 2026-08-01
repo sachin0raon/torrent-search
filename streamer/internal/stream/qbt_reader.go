@@ -112,7 +112,7 @@ func (r *qbtReader) Read(p []byte) (int, error) {
 
 	if pieceIndex != r.confirmedPiece {
 		for iter := 0; ; iter++ {
-			ready, err := r.pieceReady(pieceIndex)
+			ready, err := pieceReady(r.api, r.hash, pieceIndex)
 			if err == nil && ready {
 				break
 			}
@@ -140,7 +140,7 @@ func (r *qbtReader) Read(p []byte) (int, error) {
 	}
 
 	if r.f == nil {
-		f, err := r.openFirstExisting()
+		f, err := openFirstExisting(r.localPaths)
 		if err != nil {
 			return 0, err
 		}
@@ -155,7 +155,7 @@ func (r *qbtReader) Read(p []byte) (int, error) {
 	return got, nil
 }
 
-// torrentExists checks whether the torrent still exists in qBittorrent *and*
+// torrentAlive checks whether the torrent still exists in qBittorrent *and*
 // still has its files, returning false for either a definitive "not found"
 // (deleted entirely) or qBittorrent's own missingFiles state (the torrent
 // entry persists, but qBittorrent itself has determined its files are gone
@@ -168,10 +168,12 @@ func (r *qbtReader) Read(p []byte) (int, error) {
 // this check (network blip, timeout) is treated as inconclusive — assume the
 // torrent still exists — so a transient failure can never produce a
 // false-positive "gone" verdict and abort a stream that would have recovered.
-func (r *qbtReader) torrentExists() bool {
+// Shared by both the streaming (qbtReader) and download-manager (downloadReader)
+// paths.
+func torrentAlive(api qbtAPI, hash string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
-	torrents, err := r.api.GetTorrentsCtx(ctx, qbt.TorrentFilterOptions{Hashes: []string{r.hash}})
+	torrents, err := api.GetTorrentsCtx(ctx, qbt.TorrentFilterOptions{Hashes: []string{hash}})
 	if err != nil {
 		return true
 	}
@@ -181,13 +183,16 @@ func (r *qbtReader) torrentExists() bool {
 	return torrents[0].State != qbt.TorrentStateMissingFiles
 }
 
+func (r *qbtReader) torrentExists() bool { return torrentAlive(r.api, r.hash) }
+
 // openFirstExisting tries each candidate path in order, returning the first
 // one that opens successfully. If none exist, the piece covering the current
-// position is already confirmed downloaded (Read only calls this after that),
-// so a missing file at every candidate is unrecoverable — ErrLocalFileMissing,
-// not a timing issue.
-func (r *qbtReader) openFirstExisting() (*os.File, error) {
-	for _, path := range r.localPaths {
+// position is already confirmed downloaded (callers only reach this after
+// that), so a missing file at every candidate is unrecoverable —
+// ErrLocalFileMissing, not a timing issue. Shared by both the streaming
+// (qbtReader) and download-manager (downloadReader) paths.
+func openFirstExisting(paths []string) (*os.File, error) {
+	for _, path := range paths {
 		f, err := os.Open(path)
 		if err == nil {
 			return f, nil
@@ -199,12 +204,14 @@ func (r *qbtReader) openFirstExisting() (*os.File, error) {
 	return nil, ErrLocalFileMissing
 }
 
-// pieceReady reports whether pieceIndex is fully downloaded. It fetches the full
-// piece-state array on every call — qBittorrent exposes no per-piece endpoint.
-func (r *qbtReader) pieceReady(pieceIndex int) (bool, error) {
+// pieceReady reports whether pieceIndex is fully downloaded. It fetches the
+// full piece-state array on every call — qBittorrent exposes no per-piece
+// endpoint. Shared by both the streaming (qbtReader) and download-manager
+// (downloadReader) paths.
+func pieceReady(api qbtAPI, hash string, pieceIndex int) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
-	states, err := r.api.GetTorrentPieceStatesCtx(ctx, r.hash)
+	states, err := api.GetTorrentPieceStatesCtx(ctx, hash)
 	if err != nil {
 		return false, err
 	}
