@@ -159,6 +159,9 @@ func (f *fakeQbtAPI) DeleteTorrentsCtx(ctx context.Context, hashes []string, del
 	return nil
 }
 
+func (f *fakeQbtAPI) PauseCtx(_ context.Context, _ []string) error  { return nil }
+func (f *fakeQbtAPI) ResumeCtx(_ context.Context, _ []string) error { return nil }
+
 // getDeleteCallCount is the lock-guarded way to read deleteCalls' length from
 // a goroutine other than the one driving the fake (e.g. a test polling for a
 // background sweep to have run) — reading f.deleteCalls directly in that case

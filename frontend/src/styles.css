@@ -495,26 +495,44 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   right: 24px;
   bottom: 82px;
   z-index: 46;
+  width: 46px;
   height: 46px;
-  padding: 0 18px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
   border-radius: 999px;
   background: rgba(12, 12, 14, 0.7);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--hairline);
   color: var(--text);
-  font-weight: 600;
   box-shadow: var(--inset-hi), 0 10px 30px rgba(0, 0, 0, 0.45);
 }
 .download-fab:hover { color: #fff; background: rgba(20, 20, 24, 0.85); }
+.download-fab-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  pointer-events: none;
+  line-height: 1;
+}
 .player-links { padding-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
 .player-btn { white-space: nowrap; }
 /* Downloads modal file row: Copy link / Download file shrink to icon-only
    so the row (3 player deep links + these two) fits on one line. */
-.player-btn.icon-only { padding: 7px 10px; }
+.player-btn.icon-only { padding: 7px; }
 .player-btn.icon-only .btn-label { display: none; }
 
 /* ---- Modal ---- */

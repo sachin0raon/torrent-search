@@ -36,6 +36,8 @@ type qbtAPI interface {
 	SetFilePriorityCtx(ctx context.Context, hash string, ids string, priority int) error
 	AddTrackersCtx(ctx context.Context, hash string, urls string) error
 	DeleteTorrentsCtx(ctx context.Context, hashes []string, deleteFiles bool) error
+	PauseCtx(ctx context.Context, hashes []string) error
+	ResumeCtx(ctx context.Context, hashes []string) error
 }
 
 // --- qBittorrent engine adapter (TorrentClient) ---

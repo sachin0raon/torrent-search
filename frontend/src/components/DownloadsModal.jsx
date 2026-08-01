@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, ChevronDown, ChevronUp, Trash2, PlayCircle, Download } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Trash2, PlayCircle, Download, Pause, Play } from 'lucide-react';
 import { downloader } from '../api/downloader.js';
 import { buildDownloadUrl, playerLinks, baseName } from '../playerLinks.js';
 import { fadeUp, spring, collapsePanel } from '../motion.js';
@@ -59,7 +59,11 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete }) {
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pausing, setPausing] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const pct = Math.round((progress ?? 0) * 100);
+  const isDone = pct >= 100;
+  const isPaused = state === 'pausedDL' || state === 'stoppedDL';
 
   // Per-file progress needs its own live poll while expanded — the parent
   // list poll (below) only ever refreshes each torrent's aggregate progress,
@@ -95,6 +99,24 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete }) {
     setExpanded((e) => !e);
   }
 
+  async function handlePause() {
+    setPausing(true);
+    try {
+      await downloader.pauseDownload(hash);
+    } finally {
+      setPausing(false);
+    }
+  }
+
+  async function handleResume() {
+    setResuming(true);
+    try {
+      await downloader.resumeDownload(hash);
+    } finally {
+      setResuming(false);
+    }
+  }
+
   async function handleDelete() {
     if (!confirmDelete) {
       setConfirmDelete(true);
@@ -122,6 +144,19 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete }) {
       </div>
       <div className="stats-file-meta">{pct}%</div>
       <div className="stats-card-actions">
+        {!isDone && (
+          isPaused ? (
+            <button onClick={handleResume} disabled={resuming}>
+              <Play size={14} />
+              Resume
+            </button>
+          ) : (
+            <button onClick={handlePause} disabled={pausing}>
+              <Pause size={14} />
+              Pause
+            </button>
+          )
+        )}
         <button onClick={toggle} aria-expanded={expanded}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           {expanded ? 'Hide files' : 'Show files'}

@@ -50,4 +50,10 @@ export const downloader = {
   // Removes the torrent and its downloaded data — always deletes files.
   deleteDownload: (hash, signal) =>
     request(`/download-api/torrents/${hash}`, { method: 'DELETE', signal }),
+
+  pauseDownload: (hash, signal) =>
+    request(`/download-api/torrents/${hash}/pause`, { method: 'POST', signal }),
+
+  resumeDownload: (hash, signal) =>
+    request(`/download-api/torrents/${hash}/resume`, { method: 'POST', signal }),
 };

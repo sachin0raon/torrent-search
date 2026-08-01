@@ -149,8 +149,14 @@ export default function DownloadPanel({ magnet }) {
               exit={{ opacity: 0, scale: 0.8, y: 10 }}
               transition={{ duration: 0.2 }}
             >
-              {starting ? <RefreshCw size={16} style={{ animation: 'spin 0.7s linear infinite' }} /> : <Download size={16} />}
-              {selected.size}
+              {starting ? (
+                <RefreshCw size={18} style={{ animation: 'spin 0.7s linear infinite' }} />
+              ) : (
+                <>
+                  <Download size={18} />
+                  <span className="download-fab-badge">{selected.size}</span>
+                </>
+              )}
             </motion.button>
           ) : null}
         </AnimatePresence>,

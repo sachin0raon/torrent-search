@@ -458,6 +458,32 @@ func (m *DownloadManager) Get(ctx context.Context, hash string) (DownloadInfo, e
 	return info, nil
 }
 
+// Pause suspends downloading for the given torrent without removing it.
+func (m *DownloadManager) Pause(ctx context.Context, hash string) error {
+	if hash == "" {
+		return ErrDownloadNotFound
+	}
+	pauseCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+	defer cancel()
+	if err := m.api.PauseCtx(pauseCtx, []string{hash}); err != nil {
+		return fmt.Errorf("download: pause: %w", err)
+	}
+	return nil
+}
+
+// Resume restarts a previously paused/stopped torrent.
+func (m *DownloadManager) Resume(ctx context.Context, hash string) error {
+	if hash == "" {
+		return ErrDownloadNotFound
+	}
+	resumeCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+	defer cancel()
+	if err := m.api.ResumeCtx(resumeCtx, []string{hash}); err != nil {
+		return fmt.Errorf("download: resume: %w", err)
+	}
+	return nil
+}
+
 // Delete removes the torrent and its downloaded data. Always deletes data —
 // there is no "keep files" variant (§6.2 Assumption #8).
 func (m *DownloadManager) Delete(ctx context.Context, hash string) error {

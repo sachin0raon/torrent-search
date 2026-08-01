@@ -28,6 +28,8 @@ func registerDownloadRoutes(mux *http.ServeMux, h *Handler) {
 	mux.HandleFunc("GET /download-api/torrents", h.listDownloads)
 	mux.HandleFunc("GET /download-api/torrents/{hash}", h.getDownload)
 	mux.HandleFunc("DELETE /download-api/torrents/{hash}", h.deleteDownload)
+	mux.HandleFunc("POST /download-api/torrents/{hash}/pause", h.pauseDownload)
+	mux.HandleFunc("POST /download-api/torrents/{hash}/resume", h.resumeDownload)
 	mux.HandleFunc("GET /download-api/stream/{hash}/{index}/{filename...}", h.streamDownloadFile)
 	// Same rationale as the /stream/{id}/{index} fallback above: serve the
 	// no-filename form directly rather than 301-redirecting.
@@ -117,6 +119,28 @@ func (h *Handler) deleteDownload(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if err := h.dm.Delete(ctx, r.PathValue("hash")); err != nil {
 		log.Printf("streamer: download delete hash=%s: %v", r.PathValue("hash"), err)
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) pauseDownload(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := contextWithTimeout(r, downloadAPITimeout)
+	defer cancel()
+	if err := h.dm.Pause(ctx, r.PathValue("hash")); err != nil {
+		log.Printf("streamer: download pause hash=%s: %v", r.PathValue("hash"), err)
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) resumeDownload(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := contextWithTimeout(r, downloadAPITimeout)
+	defer cancel()
+	if err := h.dm.Resume(ctx, r.PathValue("hash")); err != nil {
+		log.Printf("streamer: download resume hash=%s: %v", r.PathValue("hash"), err)
 		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
 		return
 	}
