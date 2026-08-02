@@ -26,13 +26,32 @@ var (
 // DownloadInfo describes one torrent tracked by the download manager, for the
 // list/detail API responses.
 type DownloadInfo struct {
-	Hash     string             `json:"hash"`
-	Name     string             `json:"name"`
-	State    string             `json:"state"`
-	Progress float64            `json:"progress"`
-	DlSpeed  int64              `json:"dlspeed"`
-	Size     int64              `json:"size"`
-	Files    []DownloadFileInfo `json:"files,omitempty"`
+	Hash       string  `json:"hash"`
+	Name       string  `json:"name"`
+	State      string  `json:"state"`
+	Progress   float64 `json:"progress"`
+	DlSpeed    int64   `json:"dlspeed"`
+	Downloaded int64   `json:"downloaded"`
+	// Size is qBittorrent's own "size", the total of only the *selected*
+	// files — not the whole torrent (that's qBittorrent's separate
+	// "total_size", which this manager never reads). Progress is computed
+	// against this same selected-only total, so a season pack with 2 of 10
+	// episodes picked reads 100% once those 2 finish, same as SelectedFiles/
+	// TotalFiles below existing to make that legible in the UI instead of
+	// silently implying the whole pack is done.
+	Size int64 `json:"size"`
+	// ETA is qBittorrent's estimate in seconds; it uses a large sentinel
+	// value (qBittorrent's own "8640000" convention) for "unknown/infinite,"
+	// which callers should treat as no estimate rather than 100 days.
+	ETA int64 `json:"eta"`
+	// SelectedFiles/TotalFiles let the Downloads UI show "N of M files"
+	// alongside Progress, since Progress/Size alone can't distinguish "the
+	// whole pack finished" from "only the files I picked finished." Zero
+	// TotalFiles means the count is unavailable (e.g. a transient failure
+	// fetching qBittorrent's file list) rather than "zero files."
+	SelectedFiles int                `json:"selectedFiles"`
+	TotalFiles    int                `json:"totalFiles"`
+	Files         []DownloadFileInfo `json:"files,omitempty"`
 }
 
 // DownloadFileInfo describes one file within a download-manager torrent.
@@ -430,8 +449,17 @@ func (m *DownloadManager) verifyOwnership(ctx context.Context, hash, clientID st
 }
 
 // List returns every torrent tagged with this manager's category — the live
-// qBittorrent state backing the Downloads UI's list view. No per-file detail
-// (callers use Get for that), keeping the common polled call cheap.
+// qBittorrent state backing the Downloads UI's list view. Full per-file
+// bodies stay Get's job (Files is left unset here), but each torrent's
+// selected/total file counts are fetched too — one extra, bounded qBittorrent
+// call per torrent, run concurrently so wall time stays ~apiTimeout
+// regardless of how many torrents are listed — because without them the UI
+// has no way to show "N of M files" next to a season pack's progress (see
+// DownloadInfo's doc comment on why Progress/Size alone can't say that). This
+// app's realistic scale (a handful of concurrent downloads on a self-hosted
+// instance) is why the extra per-torrent round trip is worth it here, unlike
+// PurgeUnselected's sequential sweep where correctness under a slow/failing
+// call mattered more than latency.
 //
 // clientID additionally scopes the list to torrents tagged with that
 // browser's ID (see AddTorrent) — an empty clientID (header not sent) falls
@@ -449,17 +477,53 @@ func (m *DownloadManager) List(ctx context.Context, clientID string) ([]Download
 	// entries.
 	sort.Slice(torrents, func(i, j int) bool { return torrents[i].AddedOn > torrents[j].AddedOn })
 	out := make([]DownloadInfo, len(torrents))
+	var wg sync.WaitGroup
 	for i, t := range torrents {
 		out[i] = DownloadInfo{
-			Hash:     t.Hash,
-			Name:     t.Name,
-			State:    string(t.State),
-			Progress: t.Progress,
-			DlSpeed:  t.DlSpeed,
-			Size:     t.Size,
+			Hash:       t.Hash,
+			Name:       t.Name,
+			State:      string(t.State),
+			Progress:   t.Progress,
+			DlSpeed:    t.DlSpeed,
+			Downloaded: t.Downloaded,
+			Size:       t.Size,
+			ETA:        t.ETA,
+		}
+
+		// Each goroutine only ever writes its own index i — distinct memory,
+		// so no data race despite no mutex — and wg.Wait() below establishes
+		// the happens-before needed for this goroutine's writes to be visible
+		// once we return out.
+		wg.Add(1)
+		go func(i int, hash string) {
+			defer wg.Done()
+			filesCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+			files, err := m.api.GetFilesInformationCtx(filesCtx, hash)
+			cancel()
+			if err != nil || files == nil {
+				// Transient failure or metadata not yet arrived — leave
+				// SelectedFiles/TotalFiles at their zero value ("count
+				// unavailable"), same non-fatal posture as Get's own
+				// files-fetch degradation below.
+				return
+			}
+			out[i].SelectedFiles, out[i].TotalFiles = countFileSelection(*files)
+		}(i, t.Hash)
+	}
+	wg.Wait()
+	return out, nil
+}
+
+// countFileSelection reports how many of files have been promoted above
+// priority 0 (selected) out of the total file count.
+func countFileSelection(files qbt.TorrentFiles) (selected, total int) {
+	total = len(files)
+	for _, f := range files {
+		if f.Priority > 0 {
+			selected++
 		}
 	}
-	return out, nil
+	return selected, total
 }
 
 // Get returns one torrent's detail, including per-file progress and
@@ -486,12 +550,14 @@ func (m *DownloadManager) Get(ctx context.Context, hash, clientID string) (Downl
 	t := torrents[0]
 
 	info := DownloadInfo{
-		Hash:     t.Hash,
-		Name:     t.Name,
-		State:    string(t.State),
-		Progress: t.Progress,
-		DlSpeed:  t.DlSpeed,
-		Size:     t.Size,
+		Hash:       t.Hash,
+		Name:       t.Name,
+		State:      string(t.State),
+		Progress:   t.Progress,
+		DlSpeed:    t.DlSpeed,
+		Downloaded: t.Downloaded,
+		Size:       t.Size,
+		ETA:        t.ETA,
 	}
 
 	filesCtx, cancel2 := context.WithTimeout(ctx, apiTimeout)
@@ -503,6 +569,9 @@ func (m *DownloadManager) Get(ctx context.Context, hash, clientID string) (Downl
 	}
 	if files != nil {
 		info.Files = buildDownloadFiles(*files)
+		// Same counts List() fetches separately — here they're free, this
+		// call already has the full file list.
+		info.SelectedFiles, info.TotalFiles = countFileSelection(*files)
 	}
 	return info, nil
 }

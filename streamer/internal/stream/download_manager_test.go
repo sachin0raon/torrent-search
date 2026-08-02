@@ -200,6 +200,59 @@ func TestDownloadManager_List_FiltersByCategory(t *testing.T) {
 	}
 }
 
+// TestDownloadManager_List_IncludesFileSelectionCounts covers the "N of M
+// files" indicator: List should report each torrent's downloaded bytes, ETA,
+// and selected/total file counts alongside Progress/Size, since the latter
+// two alone can't tell a fully-selected download apart from a season pack
+// where only some files were picked.
+func TestDownloadManager_List_IncludesFileSelectionCounts(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newTestDownloadManager(t, fake)
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Name: "Show.S01", Category: "tsa-download", Downloaded: 500, ETA: 120}
+	fake.files["a"] = qbt.TorrentFiles{
+		{Index: 0, Name: "e01.mkv", Size: 100, Priority: 1},
+		{Index: 1, Name: "e02.mkv", Size: 100, Priority: 1},
+		{Index: 2, Name: "e03.mkv", Size: 100, Priority: 0},
+	}
+
+	list, err := m.List(context.Background(), "")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 torrent, got %+v", list)
+	}
+	got := list[0]
+	if got.Downloaded != 500 || got.ETA != 120 {
+		t.Errorf("expected downloaded=500 eta=120, got downloaded=%d eta=%d", got.Downloaded, got.ETA)
+	}
+	if got.SelectedFiles != 2 || got.TotalFiles != 3 {
+		t.Errorf("expected 2 of 3 files selected, got %d of %d", got.SelectedFiles, got.TotalFiles)
+	}
+}
+
+// TestDownloadManager_List_DegradesGracefullyOnFileCountError mirrors Get's
+// existing degrade-not-fail behavior for its own files-fetch call: a
+// transient failure counting one torrent's files must not fail the whole
+// list, just leave that torrent's counts at their zero value.
+func TestDownloadManager_List_DegradesGracefullyOnFileCountError(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newTestDownloadManager(t, fake)
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Category: "tsa-download", Progress: 0.5}
+	fake.filesErr = errors.New("qbittorrent unreachable")
+
+	list, err := m.List(context.Background(), "")
+	if err != nil {
+		t.Fatalf("List should degrade gracefully, not fail: %v", err)
+	}
+	if len(list) != 1 || list[0].Hash != "a" || list[0].Progress != 0.5 {
+		t.Fatalf("expected torrent-level info to survive a files-fetch failure, got %+v", list)
+	}
+	if list[0].SelectedFiles != 0 || list[0].TotalFiles != 0 {
+		t.Errorf("expected zero-value counts on a files-fetch failure, got selected=%d total=%d", list[0].SelectedFiles, list[0].TotalFiles)
+	}
+}
+
 // TestDownloadManager_List_FiltersByClientID covers the Downloads modal's
 // session-scoping: two browsers sharing one qBittorrent category should each
 // only see their own torrents when they pass their own client ID, while an
@@ -299,6 +352,9 @@ func TestDownloadManager_Get_IncludesFileSelection(t *testing.T) {
 	}
 	if info.Files[1].Selected || info.Files[1].Downloaded != 0 {
 		t.Errorf("file 1 = %+v, want not selected with downloaded=0", info.Files[1])
+	}
+	if info.SelectedFiles != 1 || info.TotalFiles != 2 {
+		t.Errorf("expected 1 of 2 files selected, got %d of %d", info.SelectedFiles, info.TotalFiles)
 	}
 }
 

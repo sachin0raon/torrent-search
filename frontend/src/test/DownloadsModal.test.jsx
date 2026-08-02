@@ -108,6 +108,64 @@ describe('DownloadsModal', () => {
     expect(downloader.getDownload).toHaveBeenCalledTimes(2);
   });
 
+  it('shows the "N of M files" indicator on the parent card for a season pack, and downloaded/total size', async () => {
+    downloader.listDownloads.mockResolvedValue([
+      {
+        hash: 'aaaa', name: 'Show.S01', state: 'downloading', progress: 0.4, dlspeed: 1024,
+        size: 2000, downloaded: 800, eta: 125, selectedFiles: 2, totalFiles: 10,
+      },
+    ]);
+
+    render(<DownloadsModal onClose={vi.fn()} />);
+
+    expect(await screen.findByText('Show.S01')).toBeInTheDocument();
+    expect(screen.getByText(/2 of 10 files/)).toBeInTheDocument();
+    // Each value is its own nowrap span (see .meta-chunk in styles.css), so
+    // "800 B / 2.0 KB" is three separate text nodes, not one string.
+    expect(screen.getByText('800 B')).toBeInTheDocument();
+    expect(screen.getByText('2.0 KB')).toBeInTheDocument();
+    expect(screen.getByText(/ETA 2m/)).toBeInTheDocument();
+  });
+
+  it('hides the "N of M files" indicator for a single-file download', async () => {
+    downloader.listDownloads.mockResolvedValue([
+      {
+        hash: 'aaaa', name: 'Movie', state: 'downloading', progress: 0.5, dlspeed: 1024,
+        size: 2000, downloaded: 1000, selectedFiles: 1, totalFiles: 1,
+      },
+    ]);
+
+    render(<DownloadsModal onClose={vi.fn()} />);
+
+    expect(await screen.findByText('Movie')).toBeInTheDocument();
+    expect(screen.queryByText(/of 1 files/)).not.toBeInTheDocument();
+  });
+
+  // Regression guard for the fix in this change: the parent card used to
+  // read its progress/state purely from the list poll's `entry` prop, which
+  // could visibly disagree with the file rows fetched by the separate
+  // expanded-card poll (different 5s timers, not phase-aligned). Once
+  // expanded, the parent card's own numbers should track the same detail
+  // response the file rows come from.
+  it('updates the parent card\'s own progress from the detail response once expanded', async () => {
+    downloader.listDownloads.mockResolvedValue([
+      { hash: 'aaaa', name: 'Movie', state: 'downloading', progress: 0.4, dlspeed: 1024, size: 2000, downloaded: 800 },
+    ]);
+    downloader.getDownload.mockResolvedValue({
+      hash: 'aaaa', name: 'Movie', state: 'downloading', progress: 0.9, dlspeed: 2048, size: 2000, downloaded: 1800,
+      files: [{ index: 0, name: 'movie.mkv', size: 2000, downloaded: 1800, selected: true }],
+    });
+
+    render(<DownloadsModal onClose={vi.fn()} />);
+    expect(await screen.findByText('Movie')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /show files/i }));
+
+    // 90% now appears twice (parent card + the single file row) — assert via
+    // findAllByText rather than requiring a single match.
+    await waitFor(async () => expect((await screen.findAllByText(/90%/)).length).toBeGreaterThanOrEqual(1));
+  });
+
   it('shows an error state when the download manager is unreachable', async () => {
     downloader.listDownloads.mockRejectedValue(new Error('qbittorrent unavailable'));
     render(<DownloadsModal onClose={vi.fn()} />);

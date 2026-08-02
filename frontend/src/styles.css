@@ -835,6 +835,11 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   font-size: 11px;
   color: var(--muted);
 }
+/* Keeps a single value (a size like "2.0 KB", "3 of 10 files", "ETA 2m")
+   from breaking mid-value on narrow screens — .stats-file-meta itself still
+   wraps freely between chunks (at the &middot; separators), just never
+   inside one. */
+.meta-chunk { white-space: nowrap; }
 .stats-empty-files {
   font-size: 12px;
   color: var(--muted);

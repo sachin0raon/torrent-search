@@ -9,6 +9,22 @@ import CopyButton from './CopyButton.jsx';
 
 const POLL_INTERVAL = 5000;
 
+// qBittorrent's own "no estimate" sentinel (its ETA field reads 8640000 —
+// 100 days — when the estimate is unknown/infinite, e.g. a stalled or
+// unselected-only torrent) rather than an actual duration.
+const ETA_UNKNOWN = 8640000;
+
+function formatEta(seconds) {
+  if (seconds == null || seconds < 0 || seconds >= ETA_UNKNOWN) return null;
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h`;
+}
+
 function DownloadFileRow({ hash, file }) {
   const name = baseName(file.name);
   const url = buildDownloadUrl(hash, file.index, name);
@@ -21,7 +37,7 @@ function DownloadFileRow({ hash, file }) {
         <div className="stats-progress-fill" style={{ width: `${pct}%` }} />
       </div>
       <div className="stats-file-meta">
-        {pct}% &middot; {formatSize(file.downloaded)} / {formatSize(file.size)}
+        {pct}% &middot; <span className="meta-chunk">{formatSize(file.downloaded)}</span> / <span className="meta-chunk">{formatSize(file.size)}</span>
       </div>
       <div className="player-links">
         {links.map((l) => (
@@ -50,16 +66,29 @@ function DownloadFileRow({ hash, file }) {
 // reference too (see DownloadsModal's useCallback below), or the comparator
 // would still see a "changed" prop on every poll.
 const DownloadCard = memo(function DownloadCard({ entry, onDelete, onRefresh }) {
-  const { hash, name, state, progress, dlspeed } = entry;
+  const { hash, name } = entry;
   const [expanded, setExpanded] = useState(false);
   const [files, setFiles] = useState(null);
+  // Torrent-level snapshot from the same expanded-card poll that fetches
+  // `files` below — once populated, this (not the `entry` prop from the
+  // parent's separate list poll) drives the card's progress bar/chips too,
+  // so an expanded card's own numbers never visibly disagree with its file
+  // rows just because the two polls' 5s timers aren't phase-aligned.
+  const [detail, setDetail] = useState(null);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const confirmTimerRef = useRef(null);
+  // Spread rather than swap outright: any field detail actually carries
+  // (the normal case — Get always returns the full torrent-level shape)
+  // wins, but a field it happens to omit falls back to entry's last-known
+  // value instead of going undefined.
+  const live = expanded && detail ? { ...entry, ...detail } : entry;
+  const { state, progress, dlspeed, size, downloaded, eta, selectedFiles, totalFiles } = live;
   const pct = Math.round((progress ?? 0) * 100);
   const isDone = pct >= 100;
   const isPaused = state === 'pausedDL' || state === 'stoppedDL';
+  const etaLabel = formatEta(eta);
 
   // Per-file progress needs its own live poll while expanded — the parent
   // list poll (below) only ever refreshes each torrent's aggregate progress,
@@ -71,11 +100,14 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete, onRefresh }) 
 
     async function loadFiles() {
       try {
-        const detail = await downloader.getDownload(hash);
-        if (active) setFiles((detail.files || []).filter((f) => f.selected));
+        const d = await downloader.getDownload(hash);
+        if (active) {
+          setFiles((d.files || []).filter((f) => f.selected));
+          setDetail(d);
+        }
       } catch {
-        // Transient failure — keep showing the last-known file list rather
-        // than blanking it, unless this was the very first load.
+        // Transient failure — keep showing the last-known file list/detail
+        // rather than blanking it, unless this was the very first load.
         if (active) setFiles((prev) => prev ?? []);
       } finally {
         if (active) setLoadingFiles(false);
@@ -134,7 +166,16 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete, onRefresh }) 
       <div className="stats-progress-bar">
         <div className="stats-progress-fill" style={{ width: `${pct}%` }} />
       </div>
-      <div className="stats-file-meta">{pct}%</div>
+      <div className="stats-file-meta">
+        {pct}% &middot; <span className="meta-chunk">{formatSize(downloaded)}</span> / <span className="meta-chunk">{formatSize(size)}</span>
+        {/* Only shown for packs (>1 file) — a single-file download is never
+            ambiguous about "the whole thing," so "1 of 1 files" would just
+            be noise. totalFiles is also 0 both before metadata arrives and
+            when the count genuinely couldn't be fetched (see DownloadInfo's
+            doc comment), so this condition naturally hides it then too. */}
+        {totalFiles > 1 ? <> &middot; <span className="meta-chunk">{selectedFiles} of {totalFiles} files</span></> : null}
+        {etaLabel ? <> &middot; <span className="meta-chunk">ETA {etaLabel}</span></> : null}
+      </div>
       <div className="stats-card-actions">
         {!isDone && (
           isPaused ? (
@@ -181,7 +222,11 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete, onRefresh }) 
   prev.entry.state === next.entry.state &&
   prev.entry.progress === next.entry.progress &&
   prev.entry.dlspeed === next.entry.dlspeed &&
-  prev.entry.size === next.entry.size);
+  prev.entry.size === next.entry.size &&
+  prev.entry.downloaded === next.entry.downloaded &&
+  prev.entry.eta === next.entry.eta &&
+  prev.entry.selectedFiles === next.entry.selectedFiles &&
+  prev.entry.totalFiles === next.entry.totalFiles);
 
 export default function DownloadsModal({ onClose }) {
   const [downloads, setDownloads] = useState(null); // null = still loading
