@@ -853,6 +853,11 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   button:not(.link) { min-height: 44px; }
   .tab { min-height: 44px; }
   .icon-btn { width: 44px; height: 44px; }
+  /* Same fix as .action-copy below: .player-btn.icon-only (Downloads modal's
+     per-file Download/Copy buttons) is icon-only at every screen width, not
+     just narrow ones, so it needs the width/height pairing unconditionally
+     here rather than combined with a max-width query like .action-copy. */
+  .player-btn.icon-only { width: 44px; height: 44px; }
   input[type='text'], input[type='number'] { min-height: 44px; }
   .toast-close { min-width: 44px; min-height: 44px; }
   .error-banner button.link { min-width: 44px; min-height: 44px; }
