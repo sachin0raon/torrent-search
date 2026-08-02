@@ -165,6 +165,11 @@ def get_forum_base_url() -> tuple[str | None, str]:
     return None, "env"
 
 
+def get_file_browser_url() -> str | None:
+    """Return the FILE_BROWSER_URL env var, or None if unset/empty."""
+    return os.environ.get("FILE_BROWSER_URL", "").strip() or None
+
+
 def set_forum_base_url(url: str) -> str:
     """Validate, normalize, and persist the forum base URL override to config.json.
 

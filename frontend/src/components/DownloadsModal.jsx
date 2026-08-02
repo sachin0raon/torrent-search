@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, ChevronDown, ChevronUp, Trash2, PlayCircle, Download, Pause, Play } from 'lucide-react';
 import { downloader } from '../api/downloader.js';
-import { buildDownloadUrl, playerLinks, baseName } from '../playerLinks.js';
+import { buildDownloadUrl, playerLinks, baseName, isMediaFile } from '../playerLinks.js';
 import { fadeUp, spring, collapsePanel } from '../motion.js';
 import { formatSize } from '../formatSize.js';
 import CopyButton from './CopyButton.jsx';
@@ -12,7 +12,7 @@ const POLL_INTERVAL = 5000;
 function DownloadFileRow({ hash, file }) {
   const name = baseName(file.name);
   const url = buildDownloadUrl(hash, file.index, name);
-  const links = playerLinks(url, name);
+  const links = isMediaFile(name) ? playerLinks(url, name) : [];
   const pct = file.size > 0 ? Math.min(100, Math.round((file.downloaded / file.size) * 100)) : 0;
   return (
     <div className="stats-file-row">
@@ -23,9 +23,6 @@ function DownloadFileRow({ hash, file }) {
       <div className="stats-file-meta">
         {pct}% &middot; {formatSize(file.downloaded)} / {formatSize(file.size)}
       </div>
-      {/* Copy link + Download file are icon-only here (unlike other CopyButton
-          spots) so this five-button row — 3 player deep links plus these two
-          — fits on one line instead of wrapping. */}
       <div className="player-links">
         {links.map((l) => (
           <a key={l.id} href={l.href} rel="noreferrer">

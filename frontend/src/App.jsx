@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSessions } from './sessionContext.jsx';
 import { useDownloadsEnabled } from './downloadCapabilityContext.jsx';
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
-import { HardDriveDownload } from 'lucide-react';
+import { HardDriveDownload, FolderOpen } from 'lucide-react';
 import { api } from './api/client.js';
 import * as clientTorrentio from './api/torrentio.js';
 import * as clientComet from './api/comet.js';
@@ -50,6 +50,7 @@ export default function App() {
   const [showStats, setShowStats] = useState(false);
   const [showDownloads, setShowDownloads] = useState(false);
   const downloadsEnabled = useDownloadsEnabled();
+  const [fileBrowserUrl, setFileBrowserUrl] = useState('');
   const [forumOnly, setForumOnly] = useState(false); // forum-only search (no TMDB title)
   const [tmdbFailed, setTmdbFailed] = useState(false); // last title search errored
   const [discoverActive, setDiscoverActive] = useState(getActiveDiscoverBadge); // active Discover badge key, or null
@@ -61,6 +62,13 @@ export default function App() {
     setDiscoverActive(next);
     setActiveDiscoverBadge(next);
   }
+
+  // Fetch once on mount — file_browser_url is a deploy-time env value that never changes.
+  useEffect(() => {
+    api.getConfig().then((c) => {
+      if (c?.file_browser_url) setFileBrowserUrl(c.file_browser_url);
+    }).catch(() => {});
+  }, []);
 
   // Auto-dismiss the error toast after a few seconds.
   useEffect(() => {
@@ -277,16 +285,6 @@ export default function App() {
     <MotionConfig reducedMotion="user">
       <div className="container">
         <header className="app-header">
-          {downloadsEnabled ? (
-            <button
-              className="icon-btn"
-              onClick={() => setShowDownloads(true)}
-              aria-label="Downloads"
-              title="Downloads"
-            >
-              <HardDriveDownload />
-            </button>
-          ) : null}
           <button
             className="icon-btn"
             onClick={() => setShowSettings(true)}
@@ -410,19 +408,38 @@ export default function App() {
         <Toast variant="info" message={info} onDismiss={() => setInfo('')} />
         <ScrollToTopButton />
 
-        {sessions.size > 0 && (
-          <button
-            className="stats-fab icon-btn"
-            onClick={() => setShowStats(true)}
-            aria-label="Active streams"
-            title="Active streams"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
-              strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-            </svg>
-          </button>
-        )}
+        <div className="right-fabs">
+          {fileBrowserUrl ? (
+            <a href={fileBrowserUrl} target="_blank" rel="noreferrer">
+              <button className="stats-fab icon-btn" aria-label="File browser" title="File browser">
+                <FolderOpen size={18} />
+              </button>
+            </a>
+          ) : null}
+          {downloadsEnabled ? (
+            <button
+              className="stats-fab icon-btn"
+              onClick={() => setShowDownloads(true)}
+              aria-label="Downloads"
+              title="Downloads"
+            >
+              <HardDriveDownload size={18} />
+            </button>
+          ) : null}
+          {sessions.size > 0 ? (
+            <button
+              className="stats-fab icon-btn"
+              onClick={() => setShowStats(true)}
+              aria-label="Active streams"
+              title="Active streams"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
+                strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+            </button>
+          ) : null}
+        </div>
 
         <AnimatePresence>
           {showSettings ? (

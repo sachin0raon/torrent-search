@@ -54,3 +54,15 @@ export function baseName(path) {
   const parts = String(path).split('/');
   return parts[parts.length - 1] || path;
 }
+
+const MEDIA_EXTENSIONS = new Set([
+  'mp4', 'mkv', 'avi', 'mov', 'wmv', 'm4v', 'ts', 'mpg', 'mpeg', 'webm',
+  'flv', 'm2ts', 'vob', '3gp', 'asf', 'rmvb', 'divx',
+  'mp3', 'flac', 'aac', 'wav', 'ogg', 'm4a', 'opus', 'wma', 'aiff', 'ape',
+]);
+
+// isMediaFile returns true when the file extension is a known video or audio type.
+export function isMediaFile(name) {
+  const ext = String(name).split('.').pop().toLowerCase();
+  return MEDIA_EXTENSIONS.has(ext);
+}

@@ -701,6 +701,9 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 
   .scroll-top-btn { bottom: 16px; right: 16px; }
   .download-fab { bottom: 72px; right: 16px; }
+  /* icon-btn is 44px tall on mobile vs 42px on desktop — push the column down
+     to maintain the same visual gap below the Settings button. */
+  .right-fabs { top: 74px; }
 
   /* Source tabs: 4 tabs no longer fit on one line on narrow screens —
      wrap into a 2-column grid instead of forcing horizontal scroll. */
@@ -717,11 +720,18 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 }
 
 /* ---- Stats FAB (floating activity button, top-left) ---- */
-.stats-fab {
+.right-fabs {
   position: fixed;
   top: 66px;
   right: 16px;
   z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+.right-fabs a { display: contents; }
+.stats-fab {
   width: 40px;
   height: 40px;
   border-radius: 50%;
