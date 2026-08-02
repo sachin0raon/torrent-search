@@ -7,7 +7,7 @@ import DownloadPanel from './DownloadPanel.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
 import ForumTopicRow from './ForumTopicRow.jsx';
 import { useDownloadsEnabled } from '../downloadCapabilityContext.jsx';
-import { spring, staggerContainer, staggerItem, collapsePanel } from '../motion.js';
+import { staggerContainer, staggerItem, collapsePanel } from '../motion.js';
 
 // Torrent sources (Comet/Meteor/Torrentio) share this row shape once parsed;
 // Forum's row (ForumTopicRow) is genuinely different, so it stays separate.
@@ -196,20 +196,13 @@ export default function ResultTabs({
         })}
       </div>
 
-      {/* Keyed panel re-mounts on tab change: new content is in the DOM immediately,
-          only the entrance animates (no exit) so it stays interaction/test friendly. */}
-      <motion.div
-        key={tab}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={spring}
-      >
+      <div key={tab}>
         {tab === 'forum' ? (
           <ForumTab result={sources.forum} onRetry={onRetryForum} />
         ) : (
           <TorrentTab result={sources[tab]} sourceLabel={activeLabel} onRetry={retryFns[tab]} />
         )}
-      </motion.div>
+      </div>
     </div>
   );
 }

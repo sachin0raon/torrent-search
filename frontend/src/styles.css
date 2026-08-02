@@ -613,6 +613,26 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .season-episode select { min-width: 170px; }
 .notice { color: var(--muted); font-size: 13px; margin: 8px 0; }
 
+/* ---- Filter bar (resolution + language dropdowns above result tabs) ---- */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.filter-field label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+.filter-field select { min-width: 130px; padding: 8px 36px 8px 14px; }
+
 /* ---- Toast (top-right, auto-dismiss) ---- */
 .toast-wrap {
   position: fixed;

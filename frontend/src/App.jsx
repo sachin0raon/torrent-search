@@ -16,12 +16,14 @@ import DiscoverSection from './components/DiscoverSection.jsx';
 import TitleList from './components/TitleList.jsx';
 import SeasonEpisodePicker from './components/SeasonEpisodePicker.jsx';
 import ResultTabs from './components/ResultTabs.jsx';
+import FilterBar from './components/FilterBar.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import StatsModal from './components/StatsModal.jsx';
 import DownloadsModal from './components/DownloadsModal.jsx';
 import Toast from './components/Toast.jsx';
 import ScrollToTopButton from './components/ScrollToTopButton.jsx';
 import { fadeUp, spring } from './motion.js';
+import { useFilterState, applyFilters } from './filterState.js';
 
 // Each torrent source is fetched independently (own backend endpoint, own
 // client-side module, own client/server mode toggle), so one slow/failed
@@ -56,6 +58,7 @@ export default function App() {
   const [discoverActive, setDiscoverActive] = useState(getActiveDiscoverBadge); // active Discover badge key, or null
   const [discoverActiveBeforeSelect, setDiscoverActiveBeforeSelect] = useState(null); // restored by "Change title"
   const { sessions } = useSessions();
+  const { resolution, language, setResolution, setLanguage } = useFilterState();
 
   function toggleDiscoverBadge(key) {
     const next = discoverActive === key ? null : key;
@@ -273,6 +276,14 @@ export default function App() {
 
   const isTvSelected = selected?.media_type === 'tv';
 
+  const filters = { resolution, language };
+  const filteredSources = sources ? {
+    comet:     { ...sources.comet,     items: applyFilters(sources.comet.items,     filters) },
+    meteor:    { ...sources.meteor,    items: applyFilters(sources.meteor.items,    filters) },
+    torrentio: { ...sources.torrentio, items: applyFilters(sources.torrentio.items, filters) },
+    forum:     sources.forum,
+  } : null;
+
   // Offer a forum-only search when TMDB errored or returned nothing for a query.
   const showForumFallback =
     !!rawQuery &&
@@ -363,14 +374,22 @@ export default function App() {
                 />
               ) : null}
 
-              {sources ? (
-                <ResultTabs
-                  sources={sources}
-                  onRetryTorrentio={() => retryTorrentSource('torrentio')}
-                  onRetryComet={() => retryTorrentSource('comet')}
-                  onRetryMeteor={() => retryTorrentSource('meteor')}
-                  onRetryForum={retryForum}
-                />
+              {filteredSources ? (
+                <>
+                  <FilterBar
+                    resolution={resolution}
+                    language={language}
+                    onResolutionChange={setResolution}
+                    onLanguageChange={setLanguage}
+                  />
+                  <ResultTabs
+                    sources={filteredSources}
+                    onRetryTorrentio={() => retryTorrentSource('torrentio')}
+                    onRetryComet={() => retryTorrentSource('comet')}
+                    onRetryMeteor={() => retryTorrentSource('meteor')}
+                    onRetryForum={retryForum}
+                  />
+                </>
               ) : null}
             </motion.div>
           ) : null}
