@@ -235,7 +235,17 @@ func hasSelectedFile(files *qbt.TorrentFiles) bool {
 // this runs synchronously in the calling goroutine rather than via a
 // background poller + channel: it's called directly from a single blocking
 // HTTP handler, so there's no async session model to feed.
-func (m *DownloadManager) AddTorrent(ctx context.Context, magnet string) (DownloadInfo, error) {
+//
+// clientID additionally tags the torrent (qBittorrent's own per-torrent tag,
+// separate from category) with the requesting browser's ID, so List/Get and
+// the mutating calls below can scope themselves to "this browser's
+// downloads" rather than the whole shared category — see the Downloads
+// modal's session-scoping design. An empty clientID (header not sent) tags
+// nothing, which List/Get/etc. treat as "no scoping," same as before this
+// was added. Tagging failures are logged, not fatal — a torrent that isn't
+// tagged yet still downloads fine; it just won't show up in a scoped list
+// until a retry (e.g. the next SelectFiles poll) succeeds.
+func (m *DownloadManager) AddTorrent(ctx context.Context, magnet, clientID string) (DownloadInfo, error) {
 	clean := sanitizeMagnet(magnet)
 	hash, err := parseMagnetInfohash(clean)
 	if err != nil {
@@ -258,12 +268,24 @@ func (m *DownloadManager) AddTorrent(ctx context.Context, magnet string) (Downlo
 			"sequentialDownload": "true",
 			"firstLastPiecePrio": "true",
 		}
+		if clientID != "" {
+			opts["tags"] = clientID
+		}
 		addCtx, addCancel := context.WithTimeout(ctx, apiTimeout)
 		_, err = m.api.AddTorrentFromUrlCtx(addCtx, clean, opts)
 		addCancel()
 		if err != nil {
 			return DownloadInfo{}, fmt.Errorf("download: add torrent: %w", err)
 		}
+	} else if clientID != "" {
+		// Additive (go-qbittorrent's AddTagsCtx never replaces existing tags),
+		// so a second browser picking a file from a pack this session already
+		// started just gains visibility too, rather than losing it.
+		tagCtx, tagCancel := context.WithTimeout(ctx, apiTimeout)
+		if err := m.api.AddTagsCtx(tagCtx, []string{hash}, clientID); err != nil {
+			log.Printf("streamer: download add tag hash=%.8s: %v (torrent still usable, just unscoped)", hash, err)
+		}
+		tagCancel()
 	}
 
 	// Already-tracked torrents use pollExistingOnce, which skips the
@@ -365,9 +387,12 @@ func (m *DownloadManager) pollExistingOnce(ctx context.Context, hash string) (Do
 // (Decision #6/#14), selecting more files never demotes ones already
 // selected — season-pack downloads can pick several files at once with no
 // deferred-demotion/refcounting machinery needed (§6.2 Assumption #7).
-func (m *DownloadManager) SelectFiles(ctx context.Context, hash string, indices []int) error {
+func (m *DownloadManager) SelectFiles(ctx context.Context, hash string, indices []int, clientID string) error {
 	if hash == "" {
 		return ErrDownloadNotFound
+	}
+	if err := m.verifyOwnership(ctx, hash, clientID); err != nil {
+		return err
 	}
 	if len(indices) == 0 {
 		return nil
@@ -384,13 +409,37 @@ func (m *DownloadManager) SelectFiles(ctx context.Context, hash string, indices 
 	return nil
 }
 
+// verifyOwnership confirms hash is both category- and clientID-tagged before
+// a mutating call (Pause/Resume/Delete/SelectFiles) acts on it, returning
+// ErrDownloadNotFound otherwise — a hash isn't secret (it's visible in every
+// player/download link), so without this a browser that merely learned
+// another session's hash could still act on it directly even though List
+// itself is scoped. An empty clientID (header not sent) skips the tag check,
+// same graceful no-scoping fallback as List/Get.
+func (m *DownloadManager) verifyOwnership(ctx context.Context, hash, clientID string) error {
+	checkCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+	torrents, err := m.api.GetTorrentsCtx(checkCtx, qbt.TorrentFilterOptions{Hashes: []string{hash}, Tag: clientID})
+	cancel()
+	if err != nil {
+		return fmt.Errorf("download: verify ownership: %w", err)
+	}
+	if len(torrents) == 0 {
+		return ErrDownloadNotFound
+	}
+	return nil
+}
+
 // List returns every torrent tagged with this manager's category — the live
 // qBittorrent state backing the Downloads UI's list view. No per-file detail
 // (callers use Get for that), keeping the common polled call cheap.
-func (m *DownloadManager) List(ctx context.Context) ([]DownloadInfo, error) {
+//
+// clientID additionally scopes the list to torrents tagged with that
+// browser's ID (see AddTorrent) — an empty clientID (header not sent) falls
+// back to the unscoped, category-wide list.
+func (m *DownloadManager) List(ctx context.Context, clientID string) ([]DownloadInfo, error) {
 	listCtx, cancel := context.WithTimeout(ctx, apiTimeout)
 	defer cancel()
-	torrents, err := m.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Category: m.category})
+	torrents, err := m.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Category: m.category, Tag: clientID})
 	if err != nil {
 		return nil, fmt.Errorf("download: list: %w", err)
 	}
@@ -421,12 +470,12 @@ func (m *DownloadManager) List(ctx context.Context) ([]DownloadInfo, error) {
 // rather than failing the whole call: this is the polled detail endpoint,
 // so a one-off files-fetch error shouldn't turn a working progress display
 // into an error state.
-func (m *DownloadManager) Get(ctx context.Context, hash string) (DownloadInfo, error) {
+func (m *DownloadManager) Get(ctx context.Context, hash, clientID string) (DownloadInfo, error) {
 	if hash == "" {
 		return DownloadInfo{}, ErrDownloadNotFound
 	}
 	listCtx, cancel := context.WithTimeout(ctx, apiTimeout)
-	torrents, err := m.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Hashes: []string{hash}})
+	torrents, err := m.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Hashes: []string{hash}, Tag: clientID})
 	cancel()
 	if err != nil {
 		return DownloadInfo{}, fmt.Errorf("download: get: %w", err)
@@ -459,9 +508,12 @@ func (m *DownloadManager) Get(ctx context.Context, hash string) (DownloadInfo, e
 }
 
 // Pause suspends downloading for the given torrent without removing it.
-func (m *DownloadManager) Pause(ctx context.Context, hash string) error {
+func (m *DownloadManager) Pause(ctx context.Context, hash, clientID string) error {
 	if hash == "" {
 		return ErrDownloadNotFound
+	}
+	if err := m.verifyOwnership(ctx, hash, clientID); err != nil {
+		return err
 	}
 	pauseCtx, cancel := context.WithTimeout(ctx, apiTimeout)
 	defer cancel()
@@ -472,9 +524,12 @@ func (m *DownloadManager) Pause(ctx context.Context, hash string) error {
 }
 
 // Resume restarts a previously paused/stopped torrent.
-func (m *DownloadManager) Resume(ctx context.Context, hash string) error {
+func (m *DownloadManager) Resume(ctx context.Context, hash, clientID string) error {
 	if hash == "" {
 		return ErrDownloadNotFound
+	}
+	if err := m.verifyOwnership(ctx, hash, clientID); err != nil {
+		return err
 	}
 	resumeCtx, cancel := context.WithTimeout(ctx, apiTimeout)
 	defer cancel()
@@ -486,9 +541,12 @@ func (m *DownloadManager) Resume(ctx context.Context, hash string) error {
 
 // Delete removes the torrent and its downloaded data. Always deletes data —
 // there is no "keep files" variant (§6.2 Assumption #8).
-func (m *DownloadManager) Delete(ctx context.Context, hash string) error {
+func (m *DownloadManager) Delete(ctx context.Context, hash, clientID string) error {
 	if hash == "" {
 		return ErrDownloadNotFound
+	}
+	if err := m.verifyOwnership(ctx, hash, clientID); err != nil {
+		return err
 	}
 	delCtx, cancel := context.WithTimeout(ctx, apiTimeout)
 	defer cancel()

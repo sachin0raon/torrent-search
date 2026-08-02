@@ -116,6 +116,7 @@ func TestCreateDownload_MetadataTimeout(t *testing.T) {
 
 func TestSelectDownloadFiles_OK(t *testing.T) {
 	fake := newFakeQbtAPI()
+	fake.torrents["hash1"] = qbt.Torrent{Hash: "hash1", Category: "tsa-download"}
 	_, srv := newDownloadTestServer(t, fake)
 
 	rec := httptest.NewRecorder()
@@ -160,6 +161,30 @@ func TestListDownloads_OK(t *testing.T) {
 	}
 }
 
+// TestListDownloads_ScopedByClientIdHeader covers the Downloads modal's
+// session scoping end to end through the HTTP layer: a request carrying
+// X-Client-Id only sees torrents tagged for that browser, not every torrent
+// in the shared category.
+func TestListDownloads_ScopedByClientIdHeader(t *testing.T) {
+	fake := newFakeQbtAPI()
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Name: "Mine", Category: "tsa-download", Tags: "browser-a"}
+	fake.torrents["b"] = qbt.Torrent{Hash: "b", Name: "Theirs", Category: "tsa-download", Tags: "browser-b"}
+	_, srv := newDownloadTestServer(t, fake)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/download-api/torrents", nil)
+	req.Header.Set("X-Client-Id", "browser-a")
+	srv.ServeHTTP(rec, req)
+
+	var list []DownloadInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Hash != "a" {
+		t.Fatalf("expected only browser-a's torrent, got %+v", list)
+	}
+}
+
 func TestGetDownload_NotFound(t *testing.T) {
 	_, srv := newDownloadTestServer(t, newFakeQbtAPI())
 	rec := httptest.NewRecorder()
@@ -183,6 +208,7 @@ func TestGetDownload_QbittorrentUnavailable(t *testing.T) {
 
 func TestDeleteDownload_OK(t *testing.T) {
 	fake := newFakeQbtAPI()
+	fake.torrents["hash1"] = qbt.Torrent{Hash: "hash1", Category: "tsa-download"}
 	_, srv := newDownloadTestServer(t, fake)
 
 	rec := httptest.NewRecorder()
@@ -192,6 +218,28 @@ func TestDeleteDownload_OK(t *testing.T) {
 	}
 	if len(fake.deleteCalls) != 1 || fake.deleteCalls[0][0] != "hash1" {
 		t.Errorf("unexpected delete calls: %v", fake.deleteCalls)
+	}
+}
+
+// TestDeleteDownload_NotFoundForAnotherClientsHash covers the ownership side
+// through the HTTP layer: a hash tagged for a different browser must 404,
+// not delete — the hash itself isn't secret (it's in every player link), so
+// scoping List alone wouldn't be enough.
+func TestDeleteDownload_NotFoundForAnotherClientsHash(t *testing.T) {
+	fake := newFakeQbtAPI()
+	fake.torrents["hash1"] = qbt.Torrent{Hash: "hash1", Category: "tsa-download", Tags: "browser-a"}
+	_, srv := newDownloadTestServer(t, fake)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/download-api/torrents/hash1", nil)
+	req.Header.Set("X-Client-Id", "browser-b")
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+	if len(fake.deleteCalls) != 0 {
+		t.Errorf("expected no delete call for another client's hash, got %v", fake.deleteCalls)
 	}
 }
 

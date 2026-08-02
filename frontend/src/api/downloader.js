@@ -3,9 +3,10 @@
 // Errors carry the service's {error} message. Absent (DOWNLOAD_ENGINE unset)
 // deployments 404 on every route except /status, which always answers
 // {enabled:false} — see docs/STREAMING.md §6.
+import { getDownloadClientId } from '../downloadClientId.js';
 
 async function request(path, { method = 'GET', body, signal } = {}) {
-  const opts = { method, signal, headers: {} };
+  const opts = { method, signal, headers: { 'X-Client-Id': getDownloadClientId() } };
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);

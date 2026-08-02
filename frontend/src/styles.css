@@ -502,14 +502,14 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: rgba(12, 12, 14, 0.7);
+  background: rgba(22, 22, 26, 0.92);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--hairline);
   color: var(--text);
   box-shadow: var(--inset-hi), 0 10px 30px rgba(0, 0, 0, 0.45);
 }
-.download-fab:hover { color: #fff; background: rgba(20, 20, 24, 0.85); }
+.download-fab:hover { color: #fff; background: rgba(36, 36, 44, 0.98); }
 .download-fab-badge {
   position: absolute;
   top: -5px;
@@ -584,14 +584,14 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   height: 46px;
   padding: 0;
   border-radius: 999px;
-  background: rgba(12, 12, 14, 0.7);
+  background: rgba(22, 22, 26, 0.92);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--hairline);
   color: var(--muted);
   box-shadow: var(--inset-hi), 0 10px 30px rgba(0, 0, 0, 0.45);
 }
-.scroll-top-btn:hover { color: var(--text); background: rgba(20, 20, 24, 0.85); }
+.scroll-top-btn:hover { color: var(--text); background: rgba(36, 36, 44, 0.98); }
 .scroll-top-btn svg { width: 20px; height: 20px; }
 
 /* ---- Season/episode ---- */
@@ -858,4 +858,19 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   .error-banner button.link { min-width: 44px; min-height: 44px; }
   /* Rotate-on-hover sticks after tap on touch; keep the settings icon still. */
   .icon-btn:hover { transform: none; }
+}
+
+/* .action-copy goes icon-only (30x30, see the max-width:768px block above)
+   only once the row has also wrapped to its narrow layout. But the blanket
+   `button:not(.link) { min-height: 44px }` rule above applies on *any*
+   coarse pointer, wide or narrow, and min-height always wins over a smaller
+   height — so on a real phone (narrow width + coarse pointer together) the
+   button was stuck at 30 wide x 44 tall: an oval, not a circle. Require both
+   conditions together here (rather than pointer:coarse alone) so a
+   wide-but-touch device — a kiosk or touchscreen monitor above 768px, where
+   the label is still showing and 44px padding is correct — doesn't get
+   force-squared into an icon-only box it was never meant to have. */
+@media (max-width: 768px) and (pointer: coarse) {
+  .result-row .actions button.action-copy,
+  .forum-link-row .actions button.action-copy { width: 44px; height: 44px; }
 }

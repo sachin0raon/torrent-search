@@ -65,7 +65,7 @@ func TestDownloadManager_AddTorrent_ZerosAllPrioritiesOnceReady(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	info, err := m.AddTorrent(ctx, "magnet:?xt=urn:btih:"+hash)
+	info, err := m.AddTorrent(ctx, "magnet:?xt=urn:btih:"+hash, "client-1")
 	if err != nil {
 		t.Fatalf("AddTorrent: %v", err)
 	}
@@ -84,6 +84,9 @@ func TestDownloadManager_AddTorrent_ZerosAllPrioritiesOnceReady(t *testing.T) {
 
 	if len(fake.added) != 1 {
 		t.Fatalf("expected one add-torrent call, got %d", len(fake.added))
+	}
+	if got := fake.addedOpts[0]["tags"]; got != "client-1" {
+		t.Errorf("expected the new torrent tagged with the requesting client ID, got tags=%q", got)
 	}
 }
 
@@ -109,7 +112,7 @@ func TestDownloadManager_AddTorrent_AlreadyTrackedSkipsReAdd(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	info, err := m.AddTorrent(ctx, "magnet:?xt=urn:btih:"+hash)
+	info, err := m.AddTorrent(ctx, "magnet:?xt=urn:btih:"+hash, "client-2")
 	if err != nil {
 		t.Fatalf("AddTorrent: %v", err)
 	}
@@ -126,6 +129,11 @@ func TestDownloadManager_AddTorrent_AlreadyTrackedSkipsReAdd(t *testing.T) {
 	if !info.Files[0].Selected {
 		t.Errorf("expected already-selected file to stay selected: %+v", info.Files[0])
 	}
+	// The already-tracked path tags via AddTagsCtx instead of the add-time
+	// "tags" opt, since there's no add call to attach it to.
+	if tags := fake.getTagsCalls(); len(tags) != 1 || tags[0].hashes[0] != hash || tags[0].tags != "client-2" {
+		t.Errorf("expected the already-tracked torrent tagged via AddTagsCtx, got %v", tags)
+	}
 }
 
 func TestDownloadManager_AddTorrent_MetadataTimeout(t *testing.T) {
@@ -135,7 +143,7 @@ func TestDownloadManager_AddTorrent_MetadataTimeout(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	_, err := m.AddTorrent(ctx, "magnet:?xt=urn:btih:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	_, err := m.AddTorrent(ctx, "magnet:?xt=urn:btih:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "")
 	if !errors.Is(err, ErrDownloadMetadataTimeout) {
 		t.Fatalf("expected ErrDownloadMetadataTimeout, got %v", err)
 	}
@@ -144,7 +152,7 @@ func TestDownloadManager_AddTorrent_MetadataTimeout(t *testing.T) {
 func TestDownloadManager_AddTorrent_InvalidMagnet(t *testing.T) {
 	fake := newFakeQbtAPI()
 	m := newTestDownloadManager(t, fake)
-	_, err := m.AddTorrent(context.Background(), "magnet:?dn=no-btih")
+	_, err := m.AddTorrent(context.Background(), "magnet:?dn=no-btih", "")
 	if !errors.Is(err, ErrDownloadInvalidMagnet) {
 		t.Fatalf("expected ErrDownloadInvalidMagnet, got %v", err)
 	}
@@ -156,8 +164,9 @@ func TestDownloadManager_AddTorrent_InvalidMagnet(t *testing.T) {
 func TestDownloadManager_SelectFiles_Additive(t *testing.T) {
 	fake := newFakeQbtAPI()
 	m := newTestDownloadManager(t, fake)
+	fake.torrents["hash1"] = qbt.Torrent{Hash: "hash1", Category: "tsa-download"}
 
-	if err := m.SelectFiles(context.Background(), "hash1", []int{0, 2}); err != nil {
+	if err := m.SelectFiles(context.Background(), "hash1", []int{0, 2}, ""); err != nil {
 		t.Fatalf("SelectFiles: %v", err)
 	}
 
@@ -179,7 +188,7 @@ func TestDownloadManager_List_FiltersByCategory(t *testing.T) {
 	fake.torrents["a"] = qbt.Torrent{Hash: "a", Name: "Mine", Category: "tsa-download", Progress: 0.5, DlSpeed: 100, Size: 1000}
 	fake.torrents["b"] = qbt.Torrent{Hash: "b", Name: "NotMine", Category: "other"}
 
-	list, err := m.List(context.Background())
+	list, err := m.List(context.Background(), "")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -188,6 +197,34 @@ func TestDownloadManager_List_FiltersByCategory(t *testing.T) {
 	}
 	if list[0].Progress != 0.5 || list[0].DlSpeed != 100 || list[0].Size != 1000 {
 		t.Errorf("unexpected fields: %+v", list[0])
+	}
+}
+
+// TestDownloadManager_List_FiltersByClientID covers the Downloads modal's
+// session-scoping: two browsers sharing one qBittorrent category should each
+// only see their own torrents when they pass their own client ID, while an
+// empty client ID (no X-Client-Id header) falls back to the pre-scoping,
+// category-wide view.
+func TestDownloadManager_List_FiltersByClientID(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newTestDownloadManager(t, fake)
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Name: "Mine", Category: "tsa-download", Tags: "client-a"}
+	fake.torrents["b"] = qbt.Torrent{Hash: "b", Name: "Theirs", Category: "tsa-download", Tags: "client-b"}
+
+	list, err := m.List(context.Background(), "client-a")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 || list[0].Hash != "a" {
+		t.Fatalf("expected only client-a's torrent, got %+v", list)
+	}
+
+	all, err := m.List(context.Background(), "")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected an empty client ID to fall back to the unscoped list, got %+v", all)
 	}
 }
 
@@ -201,7 +238,7 @@ func TestDownloadManager_List_MostRecentlyAddedFirst(t *testing.T) {
 	fake.torrents["newest"] = qbt.Torrent{Hash: "newest", Category: "tsa-download", AddedOn: 300}
 	fake.torrents["middle"] = qbt.Torrent{Hash: "middle", Category: "tsa-download", AddedOn: 200}
 
-	list, err := m.List(context.Background())
+	list, err := m.List(context.Background(), "")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -220,9 +257,24 @@ func TestDownloadManager_List_MostRecentlyAddedFirst(t *testing.T) {
 func TestDownloadManager_Get_NotFound(t *testing.T) {
 	fake := newFakeQbtAPI()
 	m := newTestDownloadManager(t, fake)
-	_, err := m.Get(context.Background(), "missing")
+	_, err := m.Get(context.Background(), "missing", "")
 	if !errors.Is(err, ErrDownloadNotFound) {
 		t.Fatalf("expected ErrDownloadNotFound, got %v", err)
+	}
+}
+
+// TestDownloadManager_Get_NotFoundForAnotherClientsHash covers the ownership
+// side of session-scoping: a hash from another browser session isn't secret
+// (it's visible in player links), so Get must still 404 it rather than treat
+// "wrong tag" as "found."
+func TestDownloadManager_Get_NotFoundForAnotherClientsHash(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newTestDownloadManager(t, fake)
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Category: "tsa-download", Tags: "client-a"}
+
+	_, err := m.Get(context.Background(), "a", "client-b")
+	if !errors.Is(err, ErrDownloadNotFound) {
+		t.Fatalf("expected ErrDownloadNotFound for a hash tagged to a different client, got %v", err)
 	}
 }
 
@@ -235,7 +287,7 @@ func TestDownloadManager_Get_IncludesFileSelection(t *testing.T) {
 		{Index: 1, Name: "b.mp4", Size: 200, Progress: 0, Priority: 0},
 	}
 
-	info, err := m.Get(context.Background(), "a")
+	info, err := m.Get(context.Background(), "a", "")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -261,7 +313,7 @@ func TestDownloadManager_Get_DegradesGracefullyOnFilesError(t *testing.T) {
 	fake.torrents["a"] = qbt.Torrent{Hash: "a", Name: "Movie", Category: "tsa-download", Progress: 0.75}
 	fake.filesErr = errors.New("qbittorrent unreachable")
 
-	info, err := m.Get(context.Background(), "a")
+	info, err := m.Get(context.Background(), "a", "")
 	if err != nil {
 		t.Fatalf("Get should degrade gracefully, not fail: %v", err)
 	}
@@ -276,11 +328,29 @@ func TestDownloadManager_Get_DegradesGracefullyOnFilesError(t *testing.T) {
 func TestDownloadManager_Delete_AlwaysDeletesFiles(t *testing.T) {
 	fake := newFakeQbtAPI()
 	m := newTestDownloadManager(t, fake)
-	if err := m.Delete(context.Background(), "hash1"); err != nil {
+	fake.torrents["hash1"] = qbt.Torrent{Hash: "hash1", Category: "tsa-download"}
+	if err := m.Delete(context.Background(), "hash1", ""); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if len(fake.deleteCalls) != 1 || len(fake.deleteCalls[0]) != 1 || fake.deleteCalls[0][0] != "hash1" {
 		t.Fatalf("unexpected delete calls: %v", fake.deleteCalls)
+	}
+}
+
+// TestDownloadManager_Delete_NotFoundForAnotherClientsHash mirrors Get's
+// ownership check: Pause/Resume/Delete/SelectFiles all route through the same
+// verifyOwnership helper, so this one case stands in for all four.
+func TestDownloadManager_Delete_NotFoundForAnotherClientsHash(t *testing.T) {
+	fake := newFakeQbtAPI()
+	m := newTestDownloadManager(t, fake)
+	fake.torrents["hash1"] = qbt.Torrent{Hash: "hash1", Category: "tsa-download", Tags: "client-a"}
+
+	err := m.Delete(context.Background(), "hash1", "client-b")
+	if !errors.Is(err, ErrDownloadNotFound) {
+		t.Fatalf("expected ErrDownloadNotFound for another client's hash, got %v", err)
+	}
+	if len(fake.deleteCalls) != 0 {
+		t.Errorf("expected no delete call for a hash owned by a different client, got %v", fake.deleteCalls)
 	}
 }
 

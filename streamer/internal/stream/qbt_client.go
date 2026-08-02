@@ -38,6 +38,7 @@ type qbtAPI interface {
 	DeleteTorrentsCtx(ctx context.Context, hashes []string, deleteFiles bool) error
 	PauseCtx(ctx context.Context, hashes []string) error
 	ResumeCtx(ctx context.Context, hashes []string) error
+	AddTagsCtx(ctx context.Context, hashes []string, tags string) error
 }
 
 // --- qBittorrent engine adapter (TorrentClient) ---

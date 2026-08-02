@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	qbt "github.com/autobrr/go-qbittorrent"
@@ -14,8 +15,12 @@ type fakeQbtAPI struct {
 
 	loginErr error
 
-	addErr error
-	added  []string
+	addErr    error
+	added     []string
+	addedOpts []map[string]string
+
+	tagsCalls []tagsCall
+	tagsErr   error
 
 	torrents       map[string]qbt.Torrent // by hash
 	getTorrentsErr error
@@ -47,6 +52,11 @@ type priorityCall struct {
 
 type trackersCall struct{ hash, urls string }
 
+type tagsCall struct {
+	hashes []string
+	tags   string
+}
+
 func newFakeQbtAPI() *fakeQbtAPI {
 	return &fakeQbtAPI{
 		torrents:    make(map[string]qbt.Torrent),
@@ -65,6 +75,7 @@ func (f *fakeQbtAPI) AddTorrentFromUrlCtx(ctx context.Context, url string, optio
 		return nil, f.addErr
 	}
 	f.added = append(f.added, url)
+	f.addedOpts = append(f.addedOpts, options)
 	return &qbt.TorrentAddResponse{}, nil
 }
 
@@ -80,6 +91,9 @@ func (f *fakeQbtAPI) GetTorrentsCtx(ctx context.Context, o qbt.TorrentFilterOpti
 			continue
 		}
 		if len(o.Hashes) > 0 && !containsStr(o.Hashes, t.Hash) {
+			continue
+		}
+		if o.Tag != "" && !containsExactTag(t.Tags, o.Tag) {
 			continue
 		}
 		out = append(out, t)
@@ -162,6 +176,47 @@ func (f *fakeQbtAPI) DeleteTorrentsCtx(ctx context.Context, hashes []string, del
 func (f *fakeQbtAPI) PauseCtx(_ context.Context, _ []string) error  { return nil }
 func (f *fakeQbtAPI) ResumeCtx(_ context.Context, _ []string) error { return nil }
 
+// AddTagsCtx mirrors real qBittorrent's additive semantics: it appends to
+// whatever tags a torrent already has rather than replacing them, so a
+// season-pack torrent picked from by two different browser sessions ends up
+// visible to both.
+func (f *fakeQbtAPI) AddTagsCtx(ctx context.Context, hashes []string, tags string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.tagsErr != nil {
+		return f.tagsErr
+	}
+	f.tagsCalls = append(f.tagsCalls, tagsCall{hashes, tags})
+	for _, h := range hashes {
+		t, ok := f.torrents[h]
+		if !ok {
+			continue
+		}
+		if t.Tags == "" {
+			t.Tags = tags
+		} else {
+			t.Tags += "," + tags
+		}
+		f.torrents[h] = t
+	}
+	return nil
+}
+
+// containsExactTag mirrors go-qbittorrent's own filter.go helper of the same
+// name: whether the comma-separated tags string includes target as a full
+// token, not just a substring.
+func containsExactTag(tags, target string) bool {
+	if tags == "" || target == "" {
+		return false
+	}
+	for _, tag := range strings.Split(tags, ",") {
+		if strings.TrimSpace(tag) == target {
+			return true
+		}
+	}
+	return false
+}
+
 // getDeleteCallCount is the lock-guarded way to read deleteCalls' length from
 // a goroutine other than the one driving the fake (e.g. a test polling for a
 // background sweep to have run) — reading f.deleteCalls directly in that case
@@ -183,6 +238,14 @@ func (f *fakeQbtAPI) getPriorityCalls() []priorityCall {
 	defer f.mu.Unlock()
 	out := make([]priorityCall, len(f.priorityCalls))
 	copy(out, f.priorityCalls)
+	return out
+}
+
+func (f *fakeQbtAPI) getTagsCalls() []tagsCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]tagsCall, len(f.tagsCalls))
+	copy(out, f.tagsCalls)
 	return out
 }
 

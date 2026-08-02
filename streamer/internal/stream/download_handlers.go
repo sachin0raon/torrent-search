@@ -40,6 +40,15 @@ func (h *Handler) downloadStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"enabled": true})
 }
 
+// clientID reads the browser-generated ID the frontend sends on every
+// /download-api/* request (see frontend/src/downloadClientId.js) to scope
+// downloads to "this browser" instead of the whole shared qBittorrent
+// category. Absent (older client, curl, etc.) it's just "", which every
+// DownloadManager call treats as "no scoping" — see AddTorrent's doc comment.
+func clientID(r *http.Request) string {
+	return r.Header.Get("X-Client-Id")
+}
+
 func (h *Handler) createDownload(w http.ResponseWriter, r *http.Request) {
 	var req createRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Magnet) == "" {
@@ -50,7 +59,7 @@ func (h *Handler) createDownload(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r, h.cfg.MetadataTimeout)
 	defer cancel()
 
-	info, err := h.dm.AddTorrent(ctx, strings.TrimSpace(req.Magnet))
+	info, err := h.dm.AddTorrent(ctx, strings.TrimSpace(req.Magnet), clientID(r))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrDownloadInvalidMagnet):
@@ -78,7 +87,11 @@ func (h *Handler) selectDownloadFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := contextWithTimeout(r, downloadAPITimeout)
 	defer cancel()
-	if err := h.dm.SelectFiles(ctx, r.PathValue("hash"), req.Indices); err != nil {
+	if err := h.dm.SelectFiles(ctx, r.PathValue("hash"), req.Indices, clientID(r)); err != nil {
+		if errors.Is(err, ErrDownloadNotFound) {
+			writeError(w, http.StatusNotFound, "torrent not found")
+			return
+		}
 		log.Printf("streamer: download select files hash=%s: %v", r.PathValue("hash"), err)
 		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
 		return
@@ -89,7 +102,7 @@ func (h *Handler) selectDownloadFiles(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listDownloads(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r, downloadAPITimeout)
 	defer cancel()
-	list, err := h.dm.List(ctx)
+	list, err := h.dm.List(ctx, clientID(r))
 	if err != nil {
 		log.Printf("streamer: download list: %v", err)
 		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
@@ -101,7 +114,7 @@ func (h *Handler) listDownloads(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getDownload(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r, downloadAPITimeout)
 	defer cancel()
-	info, err := h.dm.Get(ctx, r.PathValue("hash"))
+	info, err := h.dm.Get(ctx, r.PathValue("hash"), clientID(r))
 	if err != nil {
 		if errors.Is(err, ErrDownloadNotFound) {
 			writeError(w, http.StatusNotFound, "torrent not found")
@@ -117,7 +130,11 @@ func (h *Handler) getDownload(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteDownload(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r, downloadAPITimeout)
 	defer cancel()
-	if err := h.dm.Delete(ctx, r.PathValue("hash")); err != nil {
+	if err := h.dm.Delete(ctx, r.PathValue("hash"), clientID(r)); err != nil {
+		if errors.Is(err, ErrDownloadNotFound) {
+			writeError(w, http.StatusNotFound, "torrent not found")
+			return
+		}
 		log.Printf("streamer: download delete hash=%s: %v", r.PathValue("hash"), err)
 		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
 		return
@@ -128,7 +145,11 @@ func (h *Handler) deleteDownload(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) pauseDownload(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r, downloadAPITimeout)
 	defer cancel()
-	if err := h.dm.Pause(ctx, r.PathValue("hash")); err != nil {
+	if err := h.dm.Pause(ctx, r.PathValue("hash"), clientID(r)); err != nil {
+		if errors.Is(err, ErrDownloadNotFound) {
+			writeError(w, http.StatusNotFound, "torrent not found")
+			return
+		}
 		log.Printf("streamer: download pause hash=%s: %v", r.PathValue("hash"), err)
 		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
 		return
@@ -139,7 +160,11 @@ func (h *Handler) pauseDownload(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) resumeDownload(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r, downloadAPITimeout)
 	defer cancel()
-	if err := h.dm.Resume(ctx, r.PathValue("hash")); err != nil {
+	if err := h.dm.Resume(ctx, r.PathValue("hash"), clientID(r)); err != nil {
+		if errors.Is(err, ErrDownloadNotFound) {
+			writeError(w, http.StatusNotFound, "torrent not found")
+			return
+		}
 		log.Printf("streamer: download resume hash=%s: %v", r.PathValue("hash"), err)
 		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
 		return
