@@ -23,6 +23,6 @@ async def read_config():
 async def update_config(payload: ConfigUpdate):
     try:
         saved = set_forum_base_url(payload.forum_base_url)
-    except ConfigError as e:
+    except (ConfigError, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     return ConfigResponse(forum_base_url=saved, source="config")

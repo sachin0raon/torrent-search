@@ -81,3 +81,23 @@ class ConfigResponse(BaseModel):
 
 class ConfigUpdate(BaseModel):
     forum_base_url: str
+
+
+# ---- 1337x Search & Magnet ----
+class X1337SearchItem(BaseModel):
+    title: str
+    detail_path: str
+    seeds: int = 0
+    leeches: int = 0
+    size: str | None = None
+    category: str | None = None
+    date: str | None = None
+
+
+class X1337SearchResponse(SourceResult):
+    items: list[X1337SearchItem] = []
+
+
+class X1337MagnetResponse(BaseModel):
+    magnet: str
+

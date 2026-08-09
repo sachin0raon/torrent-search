@@ -6,15 +6,16 @@ import StreamPanel from './StreamPanel.jsx';
 import DownloadPanel from './DownloadPanel.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
 import ForumTopicRow from './ForumTopicRow.jsx';
+import X1337Row from './X1337Row.jsx';
 import { useDownloadsEnabled } from '../downloadCapabilityContext.jsx';
 import { staggerContainer, staggerItem, collapsePanel } from '../motion.js';
 
-// Torrent sources (Comet/Meteor/Torrentio) share this row shape once parsed;
-// Forum's row (ForumTopicRow) is genuinely different, so it stays separate.
+// Torrent sources share row shapes; Forum and 1337x maintain dedicated rows.
 const TAB_ORDER = [
   { key: 'comet', label: 'Comet' },
   { key: 'meteor', label: 'Meteor' },
   { key: 'forum', label: 'Forum' },
+  { key: 'x1337', label: '1337x' },
   { key: 'torrentio', label: 'Torrentio' },
 ];
 
@@ -152,6 +153,20 @@ function ForumTab({ result, onRetry }) {
   );
 }
 
+function X1337Tab({ result, onRetry }) {
+  const [dismissed, dismiss] = useDismissedError(result?.error);
+  if (!result) return null;
+  const state = renderSourceState(result, '1337x', onRetry, dismissed, dismiss);
+  if (state) return state;
+  return (
+    <motion.div variants={staggerContainer} initial="initial" animate="animate">
+      {result.items.map((item) => (
+        <X1337Row key={item.detail_path} item={item} />
+      ))}
+    </motion.div>
+  );
+}
+
 export default function ResultTabs({
   sources,
   forumOnly = false,
@@ -159,28 +174,28 @@ export default function ResultTabs({
   onRetryComet,
   onRetryMeteor,
   onRetryForum,
+  onRetryX1337,
 }) {
   const [tab, setTab] = useState(forumOnly ? 'forum' : 'comet');
 
-  // Forum-only search (no title/imdb): render just the forum results — no
-  // other tabs, since there's nothing to search them with.
-  if (forumOnly) {
-    return <ForumTab result={sources.forum} onRetry={onRetryForum} />;
-  }
+  const visibleTabs = forumOnly
+    ? TAB_ORDER.filter((t) => t.key === 'forum' || t.key === 'x1337')
+    : TAB_ORDER;
 
   const retryFns = {
     comet: onRetryComet,
     meteor: onRetryMeteor,
     forum: onRetryForum,
+    x1337: onRetryX1337,
     torrentio: onRetryTorrentio,
   };
-  const activeLabel = TAB_ORDER.find((t) => t.key === tab).label;
+  const activeLabel = visibleTabs.find((t) => t.key === tab)?.label || '1337x';
 
   return (
     <div>
       <div className="tabs" role="tablist">
-        {TAB_ORDER.map(({ key, label }) => {
-          const result = sources[key];
+        {visibleTabs.map(({ key, label }) => {
+          const result = sources?.[key];
           const count = result?.ok ? result.items.length : 0;
           return (
             <button
@@ -198,9 +213,11 @@ export default function ResultTabs({
 
       <div key={tab}>
         {tab === 'forum' ? (
-          <ForumTab result={sources.forum} onRetry={onRetryForum} />
+          <ForumTab result={sources?.forum} onRetry={onRetryForum} />
+        ) : tab === 'x1337' ? (
+          <X1337Tab result={sources?.x1337} onRetry={onRetryX1337} />
         ) : (
-          <TorrentTab result={sources[tab]} sourceLabel={activeLabel} onRetry={retryFns[tab]} />
+          <TorrentTab result={sources?.[tab]} sourceLabel={activeLabel} onRetry={retryFns[tab]} />
         )}
       </div>
     </div>

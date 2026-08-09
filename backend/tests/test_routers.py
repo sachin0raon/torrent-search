@@ -20,6 +20,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("CONFIG_JSON_PATH", str(tmp_path / "config.json"))
     monkeypatch.setenv("TMDB_API_KEY", "test-key")
     monkeypatch.setenv("FORUM_BASE_URL", "https://forum.tld")
+    monkeypatch.setenv("FORUM_PROBE_ENABLED", "0")
     # Zero backoff so retried failures (e.g. 500) don't add real sleeps to tests.
     monkeypatch.setenv("EXTERNAL_BACKOFF_BASE", "0")
     monkeypatch.setenv("EXTERNAL_BACKOFF_CAP", "0")
@@ -28,7 +29,7 @@ def client(tmp_path, monkeypatch):
     from app.main import app
 
     # Context-manage so the lifespan runs and app.state.http (shared client) is set.
-    with TestClient(app) as client:
+    with TestClient(app, raise_server_exceptions=False) as client:
         yield client
 
 
@@ -56,6 +57,22 @@ def test_search_filters_person(client):
     assert [r["tmdb_id"] for r in results] == [1, 3]
     assert results[0]["year"] == "2020"
     assert results[1]["media_type"] == "tv"
+
+
+def test_config_roundtrip(client):
+    # Starts from env default.
+    r = client.get("/api/config").json()
+    assert r["forum_base_url"] == "https://forum.tld"
+    assert r["source"] == "env"
+
+    # Override persists.
+    r2 = client.put("/api/config", json={"forum_base_url": "https://new.tld/"}).json()
+    assert r2["forum_base_url"] == "https://new.tld"
+    assert r2["source"] == "config"
+
+    r3 = client.get("/api/config").json()
+    assert r3["source"] == "config"
+    assert r3["forum_base_url"] == "https://new.tld"
 
 
 @respx.mock
@@ -374,11 +391,13 @@ def test_forum_search_auto_updates_forum_base_on_redirect(client):
 def test_config_roundtrip(client):
     # Starts from env default.
     r = client.get("/api/config").json()
-    assert r == {"forum_base_url": "https://forum.tld", "source": "env"}
+    assert r["forum_base_url"] == "https://forum.tld"
+    assert r["source"] == "env"
 
     # Override persists.
     r2 = client.put("/api/config", json={"forum_base_url": "https://new.tld/"}).json()
-    assert r2 == {"forum_base_url": "https://new.tld", "source": "config"}
+    assert r2["forum_base_url"] == "https://new.tld"
+    assert r2["source"] == "config"
 
     r3 = client.get("/api/config").json()
     assert r3["source"] == "config"
@@ -387,4 +406,4 @@ def test_config_roundtrip(client):
 
 def test_config_rejects_invalid(client):
     resp = client.put("/api/config", json={"forum_base_url": "not-a-url"})
-    assert resp.status_code == 400
+    assert resp.status_code == 400, f"Expected 400 but got {resp.status_code}: {resp.text}"

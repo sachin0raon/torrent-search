@@ -16,6 +16,7 @@ const baseSources = {
   },
   meteor: { ...EMPTY },
   forum: { ...EMPTY },
+  x1337: { ...EMPTY },
   torrentio: { ...EMPTY },
 };
 
@@ -35,10 +36,10 @@ describe('ResultTabs', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('magnet:?xt=1');
   });
 
-  it('renders tabs in order Comet, Meteor, Forum, Torrentio', () => {
+  it('renders tabs in order Comet, Meteor, Forum, 1337x, Torrentio', () => {
     render(<ResultTabs sources={baseSources} />);
     const tabs = screen.getAllByRole('tab').map((t) => t.textContent);
-    expect(tabs).toEqual(['Comet1', 'Meteor0', 'Forum0', 'Torrentio0']);
+    expect(tabs).toEqual(['Comet1', 'Meteor0', 'Forum0', '1337x0', 'Torrentio0']);
   });
 
   it('shows per-source error banner in forum tab', async () => {
@@ -170,11 +171,11 @@ describe('ResultTabs', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Torrentio: timed out');
   });
 
-  it('forumOnly renders just the Forum tab and wires its retry', async () => {
+  it('forumOnly renders Forum and 1337x tabs and wires retries', async () => {
     const onRetryForum = vi.fn();
     const sources = { forum: { ok: false, error: 'timed out', items: [], loading: false } };
     render(<ResultTabs sources={sources} forumOnly onRetryForum={onRetryForum} />);
-    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('tab')).toHaveLength(2);
     await userEvent.click(screen.getByRole('button', { name: /retry/i }));
     expect(onRetryForum).toHaveBeenCalledTimes(1);
   });

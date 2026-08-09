@@ -3,10 +3,15 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import StreamPanel from '../components/StreamPanel.jsx';
 import { streamer } from '../api/streamer.js';
+import { SessionProvider } from '../sessionContext.jsx';
 
 vi.mock('../api/streamer.js', () => ({
   streamer: { createSession: vi.fn(), getSession: vi.fn() },
 }));
+
+function renderPanel(ui) {
+  return render(<SessionProvider>{ui}</SessionProvider>);
+}
 
 describe('StreamPanel', () => {
   beforeEach(() => {
@@ -25,7 +30,7 @@ describe('StreamPanel', () => {
       ],
     });
 
-    render(<StreamPanel magnet="magnet:?xt=1" />);
+    renderPanel(<StreamPanel magnet="magnet:?xt=1" />);
 
     expect(await screen.findByText('movie.mkv')).toBeInTheDocument();
     // Player links are hidden until the row is expanded.
@@ -38,13 +43,13 @@ describe('StreamPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: /copy stream url/i }));
     const copied = navigator.clipboard.writeText.mock.calls[0][0];
     expect(copied).toContain('/stream/sess/0/movie.mkv');
-    // Non-streamable file marked as not playable.
-    expect(screen.getByText('not playable')).toBeInTheDocument();
+    // Non-streamable file size rendered as notice.
+    expect(screen.getByText('12 B')).toBeInTheDocument();
   });
 
   it('shows an error with retry when the service fails', async () => {
     streamer.createSession.mockRejectedValueOnce(new Error('couldn\'t fetch torrent info (no peers?)'));
-    render(<StreamPanel magnet="magnet:?xt=1" />);
+    renderPanel(<StreamPanel magnet="magnet:?xt=1" />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('no peers');
 
@@ -61,7 +66,8 @@ describe('StreamPanel', () => {
       ready: true,
       files: [{ index: 0, path: 'notes.txt', size: 10, streamable: false }],
     });
-    render(<StreamPanel magnet="magnet:?xt=1" />);
-    expect(await screen.findByText('No playable video files in this torrent.')).toBeInTheDocument();
+    renderPanel(<StreamPanel magnet="magnet:?xt=1" />);
+    expect(await screen.findByText('notes.txt')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /show links/i })).not.toBeInTheDocument();
   });
 });

@@ -29,6 +29,8 @@ vi.mock('../api/client.js', () => ({
     meteor: vi.fn(),
     forumSearch: vi.fn(),
     forumTopic: vi.fn(),
+    x1337Search: vi.fn(),
+    x1337Magnet: vi.fn(),
     getConfig: vi.fn(),
     setConfig: vi.fn(),
   },
@@ -49,12 +51,15 @@ describe('App — Discover-to-streams flow', () => {
     setTorrentioMode('server');
     setCometMode('server');
     setMeteorMode('server');
+    api.getConfig.mockResolvedValue({});
     api.discover.mockResolvedValue({ results: [movie] });
     api.externalIds.mockResolvedValue({ imdb_id: 'tt123' });
     api.torrentio.mockResolvedValue({ ...EMPTY_RESULT });
     api.comet.mockResolvedValue({ ...EMPTY_RESULT });
     api.meteor.mockResolvedValue({ ...EMPTY_RESULT });
     api.forumSearch.mockResolvedValue({ ...EMPTY_RESULT });
+    api.x1337Search.mockResolvedValue({ ...EMPTY_RESULT });
+    api.x1337Magnet.mockResolvedValue({ magnet: 'magnet:?xt=test' });
   });
 
   it('picking a movie straight from Discover sends the title\'s own name/imdb to every source', async () => {

@@ -19,8 +19,9 @@ from app.config import (
     get_forum_base_url,
     get_forum_probe_settings,
 )
-from app.routers import comet, discover, forum, meteor, search, settings, torrentio
+from app.routers import comet, discover, forum, meteor, search, settings, torrentio, x1337
 from app.services.scheduler import create_scheduler
+
 
 
 def configure_logging() -> logging.Logger:
@@ -118,6 +119,7 @@ app.include_router(torrentio.router)
 app.include_router(comet.router)
 app.include_router(meteor.router)
 app.include_router(forum.router)
+app.include_router(x1337.router)
 app.include_router(settings.router)
 app.include_router(discover.router)
 

@@ -69,6 +69,12 @@ export const api = {
   forumTopic: (url, signal) =>
     request(`/api/forum/topic?${qs({ url })}`, { signal }),
 
+  x1337Search: ({ q }, signal) =>
+    request(`/api/1337x/search?${qs({ q })}`, { signal }),
+
+  x1337Magnet: ({ path }, signal) =>
+    request(`/api/1337x/magnet?${qs({ path })}`, { signal }),
+
   getConfig: (signal) => request('/api/config', { signal }),
 
   setConfig: (forumBaseUrl) =>

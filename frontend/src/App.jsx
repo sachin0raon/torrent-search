@@ -228,6 +228,22 @@ export default function App() {
     }
   }
 
+  async function fetchX1337Source(query) {
+    setSources((prev) => ({ ...prev, x1337: { ok: false, error: null, items: [], loading: true } }));
+    try {
+      const data = await api.x1337Search({ q: query });
+      setSources((prev) => ({
+        ...prev,
+        x1337: { ok: data.ok, error: data.error, items: data.items, loading: false },
+      }));
+    } catch (e) {
+      setSources((prev) => ({
+        ...prev,
+        x1337: { ok: false, error: e.message, items: [], loading: false },
+      }));
+    }
+  }
+
   // `queryOverride` is only needed by onSelectTitle's synchronous movie-path call
   // above, where a just-set rawQuery isn't visible yet in this render's closure.
   // Every other caller (season/episode picker, retry) runs after a re-render has
@@ -239,12 +255,13 @@ export default function App() {
     setLastStreamReq({ title, imdb_id, season, episode, query });
     const imdbId = imdb_id ?? undefined;
     const mediaType = title.media_type;
-    // Fire all four independently — no Promise.all gating the UI, so a fast
+    // Fire all independently — no Promise.all gating the UI, so a fast
     // source's tab is browsable while a slower one is still loading.
     fetchTorrentSource('torrentio', { imdbId, mediaType, season, episode });
     fetchTorrentSource('comet', { imdbId, mediaType, season, episode });
     fetchTorrentSource('meteor', { imdbId, mediaType, season, episode });
     fetchForumSource(query);
+    fetchX1337Source(query);
   }
 
   function retryTorrentSource(key) {
@@ -258,7 +275,12 @@ export default function App() {
     fetchForumSource(lastStreamReq.query);
   }
 
-  // Forum-only search: no TMDB title / imdb_id needed — only the Forum tab renders.
+  function retryX1337() {
+    if (!lastStreamReq) return;
+    fetchX1337Source(lastStreamReq.query);
+  }
+
+  // Forum & 1337x fallback search: no TMDB title / imdb_id needed.
   async function searchForumOnly() {
     const q = rawQuery.trim();
     if (!q) return;
@@ -267,6 +289,7 @@ export default function App() {
     setSources(null);
     setLastStreamReq({ title: null, imdb_id: null, season: undefined, episode: undefined, query: q });
     fetchForumSource(q);
+    fetchX1337Source(q);
   }
 
   function backToSearch() {
@@ -275,15 +298,14 @@ export default function App() {
   }
 
   const isTvSelected = selected?.media_type === 'tv';
-
   const filters = { resolution, language };
   const filteredSources = sources ? {
-    comet:     { ...sources.comet,     items: applyFilters(sources.comet.items,     filters) },
-    meteor:    { ...sources.meteor,    items: applyFilters(sources.meteor.items,    filters) },
-    torrentio: { ...sources.torrentio, items: applyFilters(sources.torrentio.items, filters) },
+    comet:     sources.comet     ? { ...sources.comet,     items: applyFilters(sources.comet.items     || [], filters) } : undefined,
+    meteor:    sources.meteor    ? { ...sources.meteor,    items: applyFilters(sources.meteor.items    || [], filters) } : undefined,
+    torrentio: sources.torrentio ? { ...sources.torrentio, items: applyFilters(sources.torrentio.items || [], filters) } : undefined,
+    x1337:     sources.x1337     ? { ...sources.x1337,     items: applyFilters(sources.x1337.items     || [], filters) } : undefined,
     forum:     sources.forum,
   } : null;
-
   // Offer a forum-only search when TMDB errored or returned nothing for a query.
   const showForumFallback =
     !!rawQuery &&
@@ -388,6 +410,7 @@ export default function App() {
                     onRetryComet={() => retryTorrentSource('comet')}
                     onRetryMeteor={() => retryTorrentSource('meteor')}
                     onRetryForum={retryForum}
+                    onRetryX1337={retryX1337}
                   />
                 </>
               ) : null}
@@ -418,7 +441,12 @@ export default function App() {
               </button>
             </div>
             {sources ? (
-              <ResultTabs sources={sources} forumOnly onRetryForum={retryForum} />
+              <ResultTabs
+                sources={sources}
+                forumOnly
+                onRetryForum={retryForum}
+                onRetryX1337={retryX1337}
+              />
             ) : null}
           </div>
         ) : null}
