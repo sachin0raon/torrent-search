@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	qbt "github.com/autobrr/go-qbittorrent"
@@ -22,6 +23,13 @@ var (
 	ErrDownloadMetadataTimeout = errors.New("download: timed out fetching torrent metadata")
 	ErrDownloadNotFound        = errors.New("download: torrent not found")
 )
+
+// DiskSpaceInfo describes total, free, and used space for the download directory.
+type DiskSpaceInfo struct {
+	TotalBytes uint64 `json:"totalBytes"`
+	FreeBytes  uint64 `json:"freeBytes"`
+	UsedBytes  uint64 `json:"usedBytes"`
+}
 
 // DownloadInfo describes one torrent tracked by the download manager, for the
 // list/detail API responses.
@@ -461,6 +469,26 @@ func (m *DownloadManager) verifyOwnership(ctx context.Context, hash, clientID st
 // PurgeUnselected's sequential sweep where correctness under a slow/failing
 // call mattered more than latency.
 //
+// DiskSpace queries the filesystem for free and total storage bytes on downloadDir.
+func (m *DownloadManager) DiskSpace() (DiskSpaceInfo, error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(m.downloadDir, &stat); err != nil {
+		return DiskSpaceInfo{}, fmt.Errorf("download: statfs %q: %w", m.downloadDir, err)
+	}
+	bsize := uint64(stat.Bsize)
+	total := stat.Blocks * bsize
+	free := stat.Bavail * bsize
+	var used uint64
+	if total > free {
+		used = total - free
+	}
+	return DiskSpaceInfo{
+		TotalBytes: total,
+		FreeBytes:  free,
+		UsedBytes:  used,
+	}, nil
+}
+
 // clientID additionally scopes the list to torrents tagged with that
 // browser's ID (see AddTorrent) — an empty clientID (header not sent) falls
 // back to the unscoped, category-wide list.

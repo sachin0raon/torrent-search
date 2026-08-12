@@ -23,6 +23,7 @@ const downloadAPITimeout = 15 * time.Second
 // §6.8).
 func registerDownloadRoutes(mux *http.ServeMux, h *Handler) {
 	mux.HandleFunc("GET /download-api/status", h.downloadStatus)
+	mux.HandleFunc("GET /download-api/disk", h.getDiskSpace)
 	mux.HandleFunc("POST /download-api/torrents", h.createDownload)
 	mux.HandleFunc("POST /download-api/torrents/{hash}/select", h.selectDownloadFiles)
 	mux.HandleFunc("GET /download-api/torrents", h.listDownloads)
@@ -38,6 +39,16 @@ func registerDownloadRoutes(mux *http.ServeMux, h *Handler) {
 
 func (h *Handler) downloadStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"enabled": true})
+}
+
+func (h *Handler) getDiskSpace(w http.ResponseWriter, _ *http.Request) {
+	info, err := h.dm.DiskSpace()
+	if err != nil {
+		log.Printf("streamer: download get disk space: %v", err)
+		writeError(w, http.StatusInternalServerError, "couldn't fetch disk space")
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 // clientID reads the browser-generated ID the frontend sends on every

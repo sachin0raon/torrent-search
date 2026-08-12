@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, ChevronDown, ChevronUp, Trash2, PlayCircle, Download, Pause, Play } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Trash2, PlayCircle, Download, Pause, Play, HardDrive } from 'lucide-react';
 import { downloader } from '../api/downloader.js';
 import { buildDownloadUrl, playerLinks, baseName, isMediaFile } from '../playerLinks.js';
 import { fadeUp, spring, collapsePanel } from '../motion.js';
@@ -8,6 +8,28 @@ import { formatSize } from '../formatSize.js';
 import CopyButton from './CopyButton.jsx';
 
 const POLL_INTERVAL = 5000;
+
+function DiskSpaceCard({ diskSpace }) {
+  if (!diskSpace || !diskSpace.totalBytes) return null;
+  const { totalBytes, freeBytes, usedBytes } = diskSpace;
+  const usedPct = Math.min(100, Math.max(0, Math.round((usedBytes / totalBytes) * 100)));
+
+  return (
+    <div className="disk-space-card">
+      <div className="disk-space-header">
+        <span className="disk-space-title">
+          <HardDrive size={15} /> Storage
+        </span>
+        <span className="disk-space-text">
+          {formatSize(freeBytes)} free of {formatSize(totalBytes)} ({usedPct}% used)
+        </span>
+      </div>
+      <div className="stats-progress-bar">
+        <div className="stats-progress-fill" style={{ width: `${usedPct}%` }} />
+      </div>
+    </div>
+  );
+}
 
 // qBittorrent's own "no estimate" sentinel (its ETA field reads 8640000 —
 // 100 days — when the estimate is unknown/infinite, e.g. a stalled or
@@ -230,15 +252,27 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete, onRefresh }) 
 
 export default function DownloadsModal({ onClose }) {
   const [downloads, setDownloads] = useState(null); // null = still loading
+  const [diskSpace, setDiskSpace] = useState(null);
   const [error, setError] = useState(false);
   const activeRef = useRef(true);
 
   const poll = useCallback(async () => {
     try {
-      const list = await downloader.listDownloads();
+      const [listRes, diskRes] = await Promise.allSettled([
+        downloader.listDownloads(),
+        downloader.getDiskSpace(),
+      ]);
       if (activeRef.current) {
-        setDownloads(list || []);
-        setError(false);
+        if (listRes.status === 'fulfilled') {
+          setDownloads(listRes.value || []);
+          setError(false);
+        } else {
+          setError(true);
+        }
+
+        if (diskRes.status === 'fulfilled') {
+          setDiskSpace(diskRes.value);
+        }
       }
     } catch {
       if (activeRef.current) setError(true);
@@ -291,6 +325,7 @@ export default function DownloadsModal({ onClose }) {
         </div>
 
         <div className="stats-modal-body">
+          <DiskSpaceCard diskSpace={diskSpace} />
           {downloads === null && !error ? <div className="spinner">Loading downloads…</div> : null}
           {error ? <div className="empty">Couldn't reach the download manager.</div> : null}
           {downloads && downloads.length === 0 ? (

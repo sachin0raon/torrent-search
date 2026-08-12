@@ -31,6 +31,9 @@ export const downloader = {
   // {enabled: bool} — always answerable, even when DOWNLOAD_ENGINE is unset.
   getStatus: (signal) => request('/download-api/status', { signal }),
 
+  // {totalBytes, freeBytes, usedBytes}
+  getDiskSpace: (signal) => request('/download-api/disk', { signal }),
+
   // Add a magnet and wait for its metadata; returns
   // { hash, name, files: [{ index, name, size }] }. Nothing downloads yet —
   // call selectFiles to actually start.

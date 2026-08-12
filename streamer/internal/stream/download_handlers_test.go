@@ -60,6 +60,23 @@ func TestDownloadStatus_AbsentWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestGetDiskSpace_OK(t *testing.T) {
+	fake := newFakeQbtAPI()
+	_, srv := newDownloadTestServer(t, fake)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/download-api/disk", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var space DiskSpaceInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &space); err != nil {
+		t.Fatal(err)
+	}
+	if space.TotalBytes == 0 {
+		t.Errorf("expected non-zero totalBytes, got 0")
+	}
+}
+
 func TestCreateDownload_OK(t *testing.T) {
 	fake := newFakeQbtAPI()
 	const hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
