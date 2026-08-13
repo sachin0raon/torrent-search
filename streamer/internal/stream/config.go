@@ -36,6 +36,12 @@ type Config struct {
 	// on for peer connections. Must be reachable from the internet (firewall +
 	// Docker port mapping) so peers can initiate connections and push metadata.
 	TorrentPort int
+	// HalfOpenConnsPerTorrent caps simultaneous outbound connections per torrent.
+	HalfOpenConnsPerTorrent int
+	// TotalHalfOpenConns caps global simultaneous outbound connections.
+	TotalHalfOpenConns int
+	// EstablishedConnsPerTorrent caps total established connections per torrent.
+	EstablishedConnsPerTorrent int
 	// DHTStateFile is the path where the DHT routing table is persisted between
 	// restarts. Empty string disables persistence. Defaults to the persistent
 	// data volume so the routing table survives container restarts.
@@ -97,6 +103,9 @@ func LoadConfig() Config {
 		TrackersRefresh: envSeconds("STREAM_TRACKERS_REFRESH", 21600), // 6h
 		TrackersTimeout: envSeconds("STREAM_TRACKERS_TIMEOUT", 15),
 		TorrentPort:     envInt("STREAM_TORRENT_PORT", 6881),
+		HalfOpenConnsPerTorrent:    envInt("STREAM_HALF_OPEN_CONNS_PER_TORRENT", 100),
+		TotalHalfOpenConns:         envInt("STREAM_TOTAL_HALF_OPEN_CONNS", 500),
+		EstablishedConnsPerTorrent: envInt("STREAM_ESTABLISHED_CONNS_PER_TORRENT", 200),
 		DHTStateFile:    envStr("STREAM_DHT_STATE_FILE", "/data/dht-state.json"),
 		QBitHost:        envStr("STREAM_QBIT_HOST", ""),
 		QBitUser:        envStr("STREAM_QBIT_USER", "admin"),

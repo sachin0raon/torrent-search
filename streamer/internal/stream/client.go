@@ -76,7 +76,7 @@ type anacrolixClient struct {
 // can initiate connections and push torrent metadata. dhtStateFile is the path
 // where the DHT routing table is persisted between restarts (empty = disabled).
 // Seeding and uploads are disabled; this box only leeches for playback.
-func NewAnacrolixClient(dataDir string, listenPort int, dhtStateFile string) (TorrentClient, error) {
+func NewAnacrolixClient(dataDir string, listenPort int, dhtStateFile string, halfOpenConns, totalHalfOpenConns, establishedConns int) (TorrentClient, error) {
 	cfg := torrent.NewDefaultClientConfig()
 	cfg.DataDir = dataDir
 	cfg.Seed = false
@@ -84,9 +84,9 @@ func NewAnacrolixClient(dataDir string, listenPort int, dhtStateFile string) (To
 	cfg.ListenPort = listenPort
 	// On a server with an open listen port, more simultaneous outbound attempts
 	// means faster time-to-first-connection when most peers are behind NAT.
-	cfg.HalfOpenConnsPerTorrent = 100
-	cfg.TotalHalfOpenConns = 500         // global cap shared across all torrents; default is 100
-	cfg.EstablishedConnsPerTorrent = 200 // default is 50; more connections = faster metadata
+	cfg.HalfOpenConnsPerTorrent = halfOpenConns
+	cfg.TotalHalfOpenConns = totalHalfOpenConns         // global cap shared across all torrents; default is 100
+	cfg.EstablishedConnsPerTorrent = establishedConns // default is 50; more connections = faster metadata
 	// uTP (UDP-based transport) bypasses VPS-level TCP throttling of BitTorrent
 	// traffic. UDP is confirmed unblocked. Risk: drops TCP-only peers, but
 	// virtually all modern clients support uTP. Revert if connections get worse.

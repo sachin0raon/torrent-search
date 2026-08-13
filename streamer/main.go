@@ -35,7 +35,7 @@ func buildClient(cfg stream.Config) (stream.TorrentClient, *stream.QBitPeerSourc
 		return client, nil, nil
 	}
 
-	client, err := stream.NewAnacrolixClient(cfg.DownloadDir, cfg.TorrentPort, cfg.DHTStateFile)
+	client, err := stream.NewAnacrolixClient(cfg.DownloadDir, cfg.TorrentPort, cfg.DHTStateFile, cfg.HalfOpenConnsPerTorrent, cfg.TotalHalfOpenConns, cfg.EstablishedConnsPerTorrent)
 	if err != nil {
 		return nil, nil, err
 	}
