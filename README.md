@@ -72,6 +72,8 @@ Open http://localhost:5173.
 |---------|-------|-------|
 | `TMDB_API_KEY` | `backend/.env` | Server-side only; never sent to the browser. |
 | `FORUM_BASE_URL` | `backend/.env` | Default forum base URL. |
+| `ENABLE_STREAMING` | `backend/.env` | Toggle streaming UI capability (`true`/`false`, default `true`). Set to `false` to hide Stream buttons across the app. |
+| `FILE_BROWSER_URL` | `backend/.env` | Optional URL for an external file browser button in the UI. |
 | Forum base URL override | UI ⚙️ Settings | Persisted to `backend/config.json`; overrides the `.env` default and survives restarts. |
 | Torrentio source (client/server) | UI ⚙️ Settings | Persisted per-browser in `localStorage` (key `torrentioMode`, default **client**). Client fetches Torrentio from the browser to avoid server-side Cloudflare `403`s; server uses the backend. |
 | `DISCOVER_CACHE_TTL_SECONDS` | `backend/.env` | TTL (seconds) for the in-process cache of Discover rail responses (trending/popular/top-rated). Default `3600`. Lower = fresher lists, more TMDB calls; higher = fewer calls, staler lists. |
@@ -79,6 +81,9 @@ Open http://localhost:5173.
 | `STREAM_MAX_ACTIVE` | `docker-compose.yml` / env | Max concurrent active torrents (default `5`). |
 | `STREAM_IDLE_TIMEOUT` | `docker-compose.yml` / env | Seconds of idle (no stream reads) before a torrent is dropped and its data deleted (default `600`). |
 | `STREAM_METADATA_TIMEOUT` | `docker-compose.yml` / env | Seconds to wait for torrent metadata from DHT/peers before returning a timeout error (default `45`). |
+| `STREAM_HALF_OPEN_CONNS_PER_TORRENT` | env | Max outbound half-open connections per torrent for anacrolix engine (default `100`). |
+| `STREAM_TOTAL_HALF_OPEN_CONNS` | env | Global cap on simultaneous outbound half-open connections (default `500`). |
+| `STREAM_ESTABLISHED_CONNS_PER_TORRENT` | env | Max established connections per torrent (default `200`). |
 | `STREAM_TRACKERS_URLS` | `docker-compose.yml` / env | Comma-separated URLs of public tracker lists to fetch and add to every torrent. Empty/unset = use built-in defaults; `none` = disable tracker augmentation. |
 | `STREAM_TRACKERS_REFRESH` | `docker-compose.yml` / env | How often (seconds) to refresh the tracker lists (default `21600` = 6 h). |
 | `STREAM_ENGINE` | env | BitTorrent **streaming** engine: `anacrolix` (default, unchanged behavior) or `qbittorrent`. See [docs/STREAMING.md §5](docs/STREAMING.md) for the qBittorrent-engine design. Cannot be `qbittorrent` at the same time as `DOWNLOAD_ENGINE=qbittorrent` — the streamer fails to start if both are set (see §6). |
@@ -111,11 +116,39 @@ Open http://localhost:8000.
 
 ### plain docker
 
+Command containing all configurable environment variables:
+
 ```bash
 docker build -t torrent-search-aggregator:latest .
 docker run --rm -p 8000:8080 \
   -e TMDB_API_KEY=your_tmdb_api_key \
   -e FORUM_BASE_URL=https://your-forum.tld \
+  -e ENABLE_STREAMING=true \
+  -e FILE_BROWSER_URL=https://filebrowser.yourdomain.com \
+  -e DISCOVER_CACHE_TTL_SECONDS=3600 \
+  -e FORUM_PROBE_ENABLED=true \
+  -e FORUM_PROBE_INTERVAL_MINUTES=30 \
+  -e FORUM_PROBE_QUERY=a \
+  -e STREAM_ENGINE=anacrolix \
+  -e STREAM_MAX_ACTIVE=5 \
+  -e STREAM_IDLE_TIMEOUT=600 \
+  -e STREAM_METADATA_TIMEOUT=45 \
+  -e STREAM_TORRENT_PORT=6881 \
+  -e STREAM_HALF_OPEN_CONNS_PER_TORRENT=100 \
+  -e STREAM_TOTAL_HALF_OPEN_CONNS=500 \
+  -e STREAM_ESTABLISHED_CONNS_PER_TORRENT=200 \
+  -e STREAM_TRACKERS_URLS= \
+  -e STREAM_TRACKERS_REFRESH=21600 \
+  -e DOWNLOAD_ENGINE=qbittorrent \
+  -e STREAM_QBIT_HOST=http://localhost:8080 \
+  -e STREAM_QBIT_USER=admin \
+  -e STREAM_QBIT_PASS=adminadmin \
+  -e STREAM_QBIT_REMOTE_ROOT=/data/downloads \
+  -e STREAM_QBIT_DOWNLOAD_DIR=/downloads \
+  -e STREAM_QBIT_CATEGORY=tsa-stream-engine \
+  -e STREAM_QBIT_POLL_INTERVAL=1 \
+  -e DOWNLOAD_QBIT_CATEGORY=tsa-download \
+  -e DOWNLOAD_UNSELECTED_TIMEOUT=900 \
   -v tsa_config:/data \
   -v tsa_downloads:/downloads \
   torrent-search-aggregator:latest
