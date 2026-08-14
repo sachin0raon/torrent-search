@@ -7,6 +7,7 @@ import StreamPanel from './StreamPanel.jsx';
 import DownloadPanel from './DownloadPanel.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
 import { useDownloadsEnabled } from '../downloadCapabilityContext.jsx';
+import { useStreamingEnabled } from '../streamingCapabilityContext.jsx';
 import { collapsePanel } from '../motion.js';
 
 // One link row inside an expanded forum topic. Owns its own stream-open state.
@@ -14,6 +15,7 @@ function ForumLinkRow({ link }) {
   const [streamOpen, setStreamOpen] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const downloadsEnabled = useDownloadsEnabled();
+  const streamingEnabled = useStreamingEnabled();
 
   function toggleStream() {
     setDownloadOpen(false);
@@ -36,10 +38,12 @@ function ForumLinkRow({ link }) {
           ) : null}
           {link.magnet ? (
             <>
-              <button onClick={toggleStream}>
-                <Zap size={13} />
-                {streamOpen ? 'Hide stream' : 'Stream'}
-              </button>
+              {streamingEnabled ? (
+                <button onClick={toggleStream}>
+                  <Zap size={13} />
+                  {streamOpen ? 'Hide stream' : 'Stream'}
+                </button>
+              ) : null}
               {downloadsEnabled ? (
                 <button onClick={toggleDownload}>
                   <Download size={13} />

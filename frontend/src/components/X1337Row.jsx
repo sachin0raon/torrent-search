@@ -7,6 +7,7 @@ import StreamPanel from './StreamPanel.jsx';
 import DownloadPanel from './DownloadPanel.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
 import { useDownloadsEnabled } from '../downloadCapabilityContext.jsx';
+import { useStreamingEnabled } from '../streamingCapabilityContext.jsx';
 import { staggerItem, collapsePanel } from '../motion.js';
 
 export default function X1337Row({ item }) {
@@ -16,6 +17,7 @@ export default function X1337Row({ item }) {
   const [loadingMagnet, setLoadingMagnet] = useState(false);
   const [error, setError] = useState('');
   const downloadsEnabled = useDownloadsEnabled();
+  const streamingEnabled = useStreamingEnabled();
 
   async function ensureMagnet() {
     if (magnet) return magnet;
@@ -73,10 +75,12 @@ export default function X1337Row({ item }) {
           </div>
         </div>
         <div className="actions">
-          <button onClick={toggleStream} disabled={loadingMagnet}>
-            <Zap size={13} />
-            {loadingMagnet ? 'Fetching…' : streamOpen ? 'Hide stream' : 'Stream'}
-          </button>
+          {streamingEnabled ? (
+            <button onClick={toggleStream} disabled={loadingMagnet}>
+              <Zap size={13} />
+              {loadingMagnet ? 'Fetching…' : streamOpen ? 'Hide stream' : 'Stream'}
+            </button>
+          ) : null}
           {downloadsEnabled ? (
             <button onClick={toggleDownload} disabled={loadingMagnet}>
               <Download size={13} />

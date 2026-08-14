@@ -81,3 +81,15 @@ def test_probe_settings_from_env(cfg, monkeypatch):
 def test_probe_interval_floored_at_one(cfg, monkeypatch):
     monkeypatch.setenv("FORUM_PROBE_INTERVAL_MINUTES", "0")
     assert cfg.get_forum_probe_settings().interval_minutes == 1
+
+
+def test_enable_streaming_default(cfg, monkeypatch):
+    monkeypatch.delenv("ENABLE_STREAMING", raising=False)
+    assert cfg.get_enable_streaming() is True
+
+
+def test_enable_streaming_override(cfg, monkeypatch):
+    monkeypatch.setenv("ENABLE_STREAMING", "false")
+    assert cfg.get_enable_streaming() is False
+    monkeypatch.setenv("ENABLE_STREAMING", "0")
+    assert cfg.get_enable_streaming() is False

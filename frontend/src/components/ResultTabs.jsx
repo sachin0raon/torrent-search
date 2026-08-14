@@ -8,6 +8,7 @@ import ErrorBanner from './ErrorBanner.jsx';
 import ForumTopicRow from './ForumTopicRow.jsx';
 import X1337Row from './X1337Row.jsx';
 import { useDownloadsEnabled } from '../downloadCapabilityContext.jsx';
+import { useStreamingEnabled } from '../streamingCapabilityContext.jsx';
 import { staggerContainer, staggerItem, collapsePanel } from '../motion.js';
 
 // Torrent sources share row shapes; Forum and 1337x maintain dedicated rows.
@@ -74,6 +75,7 @@ function TorrentRow({ item }) {
   const [streamOpen, setStreamOpen] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const downloadsEnabled = useDownloadsEnabled();
+  const streamingEnabled = useStreamingEnabled();
 
   function toggleStream() {
     setDownloadOpen(false);
@@ -96,10 +98,12 @@ function TorrentRow({ item }) {
           </div>
         </div>
         <div className="actions">
-          <button onClick={toggleStream} disabled={!item.magnet}>
-            <Zap size={13} />
-            {streamOpen ? 'Hide stream' : 'Stream'}
-          </button>
+          {streamingEnabled ? (
+            <button onClick={toggleStream} disabled={!item.magnet}>
+              <Zap size={13} />
+              {streamOpen ? 'Hide stream' : 'Stream'}
+            </button>
+          ) : null}
           {downloadsEnabled ? (
             <button onClick={toggleDownload} disabled={!item.magnet}>
               <Download size={13} />

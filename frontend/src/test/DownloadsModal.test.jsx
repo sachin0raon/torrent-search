@@ -9,6 +9,7 @@ vi.mock('../api/downloader.js', () => ({
     listDownloads: vi.fn(),
     getDownload: vi.fn(),
     deleteDownload: vi.fn(),
+    getDiskSpace: vi.fn().mockResolvedValue({ totalBytes: 100000000, freeBytes: 50000000, usedBytes: 50000000 }),
   },
 }));
 

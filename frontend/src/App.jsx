@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSessions } from './sessionContext.jsx';
 import { useDownloadsEnabled } from './downloadCapabilityContext.jsx';
+import { useStreamingEnabled } from './streamingCapabilityContext.jsx';
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { HardDriveDownload, FolderOpen } from 'lucide-react';
 import { api } from './api/client.js';
@@ -52,6 +53,7 @@ export default function App() {
   const [showStats, setShowStats] = useState(false);
   const [showDownloads, setShowDownloads] = useState(false);
   const downloadsEnabled = useDownloadsEnabled();
+  const streamingEnabled = useStreamingEnabled();
   const [fileBrowserUrl, setFileBrowserUrl] = useState('');
   const [forumOnly, setForumOnly] = useState(false); // forum-only search (no TMDB title)
   const [tmdbFailed, setTmdbFailed] = useState(false); // last title search errored
@@ -473,7 +475,7 @@ export default function App() {
               <HardDriveDownload size={18} />
             </button>
           ) : null}
-          {sessions.size > 0 ? (
+          {streamingEnabled && sessions.size > 0 ? (
             <button
               className="stats-fab icon-btn"
               onClick={() => setShowStats(true)}

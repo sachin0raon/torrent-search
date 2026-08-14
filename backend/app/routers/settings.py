@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from app.config import ConfigError, get_file_browser_url, get_forum_base_url, set_forum_base_url
+from app.config import ConfigError, get_enable_streaming, get_file_browser_url, get_forum_base_url, set_forum_base_url
 from app.models import ConfigResponse, ConfigUpdate
 
 router = APIRouter(prefix="/api", tags=["settings"])
@@ -16,6 +16,7 @@ async def read_config():
         forum_base_url=url,
         source=source,
         file_browser_url=get_file_browser_url(),
+        enable_streaming=get_enable_streaming(),
     )
 
 

@@ -170,6 +170,11 @@ def get_file_browser_url() -> str | None:
     return os.environ.get("FILE_BROWSER_URL", "").strip() or None
 
 
+def get_enable_streaming() -> bool:
+    """Return whether streaming is enabled via ENABLE_STREAMING env var (default: True)."""
+    return _env_flag("ENABLE_STREAMING", True)
+
+
 def set_forum_base_url(url: str) -> str:
     """Validate, normalize, and persist the forum base URL override to config.json.
 

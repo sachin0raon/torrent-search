@@ -77,6 +77,7 @@ class ConfigResponse(BaseModel):
     forum_base_url: str | None = None
     source: str  # "config" | "env"
     file_browser_url: str | None = None
+    enable_streaming: bool = True
 
 
 class ConfigUpdate(BaseModel):
