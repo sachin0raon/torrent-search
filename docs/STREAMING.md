@@ -1112,3 +1112,242 @@ anything (or set `DOWNLOAD_UNSELECTED_TIMEOUT=10` for a fast check) → confirm
 that torrent disappears from qBittorrent on its own after the timeout, while
 a *different* torrent where at least one file was selected is left alone
 indefinitely.
+
+---
+
+## 7. Active Streams Management (pause/resume/retain + move-to-download)
+
+> Status: **Implemented** (2026-08-21). Extends §5's qBittorrent streaming
+> engine. Developed via structured brainstorming (Understanding Lock
+> confirmed incrementally across several rounds, running Decision Log below)
+> — decisions #27–35.
+
+### 7.1 Understanding Summary
+
+- **What:** For the qBittorrent streaming engine only, replace today's binary
+  active/deleted session lifecycle with three states — **active**, **paused**,
+  **gone** — and extend the existing Active Streams FAB/modal
+  (`sessionContext.jsx` / `StatsModal.jsx`, already shipped, currently local-
+  browser-only) with a live, qBittorrent-backed view for that engine. Short
+  idle (~1 min, configurable) pauses the torrent (stop download **and**
+  upload) instead of deleting it; a much longer idle window (~1 day,
+  configurable) actually deletes it, uniformly for complete and incomplete
+  downloads. Resumable via the existing infohash-reuse path (§4.4), a direct
+  reconnect to the still-valid session id, or an explicit **Resume** button in
+  the modal. New per-item actions — **Resume**, **Delete now**, **Move to
+  Downloads** (hands the torrent to the already-existing, already-persistent
+  Download Manager, §6) — plus a bulk **Flush** action, all scoped by the
+  Download Manager's existing `X-Client-Id`/clientID mechanism, reused
+  as-is rather than duplicated.
+- **Why:** Today, a torrent that finishes downloading gets deleted anyway
+  once idle, wasting the completed download and forcing a full re-download if
+  the user comes back later. Pausing instead of deleting avoids that waste
+  while the longer grace period still bounds disk usage. The modal gives
+  visibility and manual control over what's sitting in qBittorrent; Move to
+  Downloads gives an explicit "keep this permanently" path.
+- **Who:** Same personal, single-user tool — but now browser-aware (via the
+  reused clientID) since more than one browser/tab may have paused sessions
+  sitting around at once.
+- **Key constraint:** Must not change anacrolix's behavior at all. anacrolix
+  keeps today's local-session-only `StatsModal` behavior — including its
+  existing `sessions.size > 0` FAB-visibility gate — completely unchanged;
+  every capability in this section is additive and gated to
+  `STREAM_ENGINE=qbittorrent`.
+- **Non-goals:** No new persistence layer — a streamer restart still triggers
+  today's full category purge (`NewQBitClient`'s startup purge, §5.5/5.6,
+  unchanged); this feature's state lives only in qBittorrent's own torrent
+  list plus the streamer's in-memory bookkeeping for one process's uptime.
+  The Download Manager's own lifecycle (§6) is untouched — this feature only
+  ever hands a torrent *to* it, never changes how it behaves once there.
+
+### 7.2 Assumptions
+
+1. Two new, qBittorrent-engine-specific config vars — a short **pause
+   threshold** (~60s default) and a long **retention threshold** (~86400s/1
+   day default) — rather than repurposing the existing, anacrolix-shared
+   `STREAM_IDLE_TIMEOUT`. Keeps anacrolix's single-timeout semantics exactly
+   as they are today.
+2. "Pause" stops both download **and** upload/seeding — a full cost-saving
+   pause, not "keep seeding while idle."
+3. Paused (retained) sessions do **not** count against `STREAM_MAX_ACTIVE` —
+   only genuinely active/streaming sessions occupy a concurrency slot, so
+   idle-but-retained torrents can't block new streams from starting.
+4. One unified retention timeout applies to both complete and incomplete idle
+   downloads — no separate, shorter track for incomplete ones. The explicit
+   manual Delete/Flush actions (7.1) exist for anyone who wants to reclaim
+   space sooner, so the automatic timer doesn't need to reason about
+   completion state.
+5. "Move to Downloads" = `SetCategoryCtx` to `DOWNLOAD_QBIT_CATEGORY`, then
+   the streaming `Manager` simply stops tracking that session (no `Drop()`,
+   no data deletion) — ownership transfers to the Download Manager's existing
+   polling, which already filters by its own category. In the common setup
+   (both engines sharing one `STREAM_QBIT_REMOTE_ROOT`/`DOWNLOAD_DIR` pair,
+   per §6.4, with no per-category save-path override configured inside
+   qBittorrent itself) this is a cheap metadata-only recategorize — no
+   re-download, no physical file move. Flagging, not blocking: if an operator
+   *has* configured a distinct default save path for the download category,
+   recategorizing could trigger qBittorrent to physically relocate the files
+   — outside this codebase's control, same class of caveat as §5.1's
+   bind-mount risk note.
+6. clientID scoping is the Download Manager's existing mechanism, reused
+   verbatim — same `X-Client-Id` header, same frontend-generated id
+   (`frontend/src/downloadClientId.js`) — not a new, parallel identity. A
+   possible follow-up rename to something engine-neutral (e.g.
+   `getClientId()`) is a naming detail for implementation time, not a design
+   fork.
+7. The modal's list, for the qBittorrent engine, is a **fresh**
+   `GetTorrentsCtx(Category: STREAM_QBIT_CATEGORY, Tag: clientID)` query
+   direct to qBittorrent on every poll tick — not the streamer's in-memory
+   `Manager.sessions`, and not the existing local `sessionContext` — mirroring
+   `DownloadManager.List(ctx, clientID)` (§6.6) exactly. This is what makes
+   paused sessions visible across page reloads and different tabs sharing the
+   same browser clientID, which today's local-only `sessionContext` cannot
+   do.
+8. **Resume-by-hash:** the modal only has a qBittorrent hash (from the fresh
+   query above), not necessarily a streamer session id. Resolving it to the
+   corresponding paused `Session` goes through `Manager.byInfohash[hash]`
+   (already exists, §4.4's reuse-by-infohash lookup). If no in-memory session
+   exists for that hash — a real but expected-rare drift case, since nothing
+   here is designed to survive a restart — see §7.8 for the fallback.
+9. Delete now / Flush / Move to Downloads all require the same
+   `verifyOwnership`-style category+clientID check the Download Manager
+   already has (§6, `verifyOwnership`) before acting, for the same
+   cross-browser-interference reason it exists there.
+10. The FAB's visibility gate, **for the qBittorrent engine only**, relaxes
+    from today's `streamingEnabled && sessions.size > 0` down to just
+    `streamingEnabled` — there's now always potentially something to show
+    (a paused torrent from an earlier page load) even with zero local
+    sessions. For anacrolix, the gate (and the rest of the modal's behavior)
+    is Assumption/Constraint-unchanged per §7.1.
+
+### 7.3 Decision Log
+
+| # | Decision | Alternatives considered | Why chosen |
+|---|----------|--------------------------|-------------|
+| 27 | Three-state lifecycle via a new optional `pausable` interface (`Pause(ctx) error`, `Resume(ctx) error`), type-asserted in `manager.go`'s idle-GC path | Fork/duplicate the idle-GC loop for the qBittorrent engine | Matches the codebase's established engine-extension convention (`filePrioritizer`, §5.7; `goneNotifiable`, §5.8) — keeps anacrolix's `Drop()`-only path completely untouched |
+| 28 | Two new qBittorrent-specific timeout vars rather than repurposing `STREAM_IDLE_TIMEOUT` | Overload the existing var with new per-engine meaning | Avoids changing the meaning of an existing, documented, anacrolix-shared config var |
+| 29 | Paused sessions excluded from `STREAM_MAX_ACTIVE` accounting | Count them like active sessions | The cap bounds concurrent active download/serving load; a paused torrent contributes none |
+| 30 | One unified retention timeout for complete and incomplete idle downloads | Shorter timeout for incomplete downloads specifically | Simpler rule; manual Delete/Flush cover anyone who wants space back sooner |
+| 31 | No new persistence layer — retained state lives only in qBittorrent's own list + in-memory `Manager.byInfohash`; startup purge (§5.5/5.6) stays exactly as-is | Persist session/pause state to disk so retained torrents survive a streamer restart | Explicitly rejected the added complexity; keeps the existing "everything ephemeral, clean slate on restart" philosophy intact |
+| 32 | Modal's list source (qBittorrent engine only) switches to a fresh `GetTorrentsCtx(Category, Tag: clientID)` query per poll | Keep local `sessionContext` tracking, layer pause/resume state on top of it | Local-only tracking can't see a paused torrent from a previous page load or a different tab; a live qBittorrent query is the actual source of truth |
+| 33 | FAB gate relaxes to `streamingEnabled` alone for the qBittorrent engine; anacrolix keeps today's `sessions.size > 0` gate and today's modal content, unchanged | Relax the gate uniformly for both engines | This whole feature is explicitly scoped to the qBittorrent engine; anacrolix has no paused/retained concept, so there's nothing new the FAB needs to surface for it |
+| 34 | Streaming reuses the Download Manager's existing clientID mechanism verbatim | Introduce a separate, parallel `streamClientId` | One shared "this browser" identity is simpler and more intuitive than two for what's conceptually the same browser |
+| 35 | "Move to Downloads" is a qBittorrent recategorize (`SetCategoryCtx`) plus dropping the streaming `Manager`'s tracking — not a delete-and-re-add | Delete from the streaming category, have the user manually re-add via the Download flow | Cheap (no re-download) in the common shared-save-path-root setup; avoids wasting already-downloaded bytes, which is the entire point of this feature |
+
+### 7.4 Configuration additions
+
+| Var | Default | Purpose |
+|---|---|---|
+| `STREAM_QBIT_PAUSE_TIMEOUT` | `60` (s) | Idle threshold (qBittorrent engine only) before a session is paused rather than deleted (Decision #28) |
+| `STREAM_QBIT_RETENTION_TIMEOUT` | `86400` (s) | Idle threshold, measured from the pause, before a paused session is actually deleted (Decision #30 — same value for complete and incomplete) |
+
+Both reuse the existing `GCInterval` tick cadence (§4.5) — no new polling loop.
+`STREAM_MAX_ACTIVE`, `STREAM_QBIT_CATEGORY`, and the shared
+`STREAM_QBIT_HOST/USER/PASS/REMOTE_ROOT/DOWNLOAD_DIR` vars are unchanged and
+reused as-is.
+
+### 7.5 Lifecycle & state model
+
+Extends `manager.go`'s existing idle-GC (§5.9) rather than replacing it:
+
+- **`collectIdle` (existing loop, extended):** for a qBittorrent-engine
+  session idle past `STREAM_QBIT_PAUSE_TIMEOUT`, instead of unconditionally
+  calling `m.remove(s)` (today's behavior), type-assert the `pausable`
+  interface (Decision #27). If present: call `Pause()`, mark the session
+  `paused` with a `pausedAt` timestamp, and **keep** it in `m.sessions`/
+  `m.byInfohash` (the key change from today — a paused session is not
+  removed). Anacrolix sessions (no `pausable`) fall through to today's
+  unchanged `m.remove(s)` behavior.
+- **A second timer check, same tick:** any session already `paused` for
+  longer than `STREAM_QBIT_RETENTION_TIMEOUT` (measured from `pausedAt`) is
+  finally `m.remove(s)`'d — today's existing `Drop()`-and-delete path,
+  unchanged, just reached via a longer, two-stage timeline instead of
+  directly.
+- **Resume paths (Assumption #7/#8):**
+  1. Infohash-reuse (§4.4's existing "already active? → reuse" check) is
+     extended to also match a `paused` session, not just an `active` one —
+     calls `Resume()` and flips the state back to `active` before returning
+     it.
+  2. A direct `GET /stream/{id}/...` reconnect against a still-known but
+     `paused` session id also triggers `Resume()` inline before serving.
+  3. The modal's explicit **Resume** button (§7.6) resolves hash →
+     `Manager.byInfohash[hash]` → `Resume()`. Per Decision/Assumption #8, if
+     that hash has no in-memory session, this is a stale-entry edge case —
+     see §7.8.
+- **`STREAM_MAX_ACTIVE` accounting (Decision #29):** the capacity check in
+  the add-session path counts only `active` sessions, skipping `paused` ones.
+
+### 7.6 HTTP API additions (qBittorrent engine only; 404 otherwise)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/stream-api/torrents` | Fresh `GetTorrentsCtx(Category: STREAM_QBIT_CATEGORY, Tag: clientID)` — powers the modal's list (Assumption #7); scoped by the `X-Client-Id` header, same convention as `/download-api/torrents` (§6.6) |
+| `POST` | `/stream-api/torrents/{hash}/resume` | Resolves `Manager.byInfohash[hash]` → `Resume()` (Assumption #8); no-op if already complete/active (locked earlier in this design) |
+| `DELETE` | `/stream-api/torrents/{hash}` | Immediate delete, skipping the retention timer — `verifyOwnership`-checked (Assumption #9) |
+| `POST` | `/stream-api/torrents/{hash}/move-to-downloads` | `SetCategoryCtx` → `DOWNLOAD_QBIT_CATEGORY`, then drops it from `Manager` tracking (Decision #35); `verifyOwnership`-checked |
+| `DELETE` | `/stream-api/torrents` | Flush — deletes every torrent matching `Category: STREAM_QBIT_CATEGORY, Tag: clientID` (Assumption #9's scoping applies to the whole batch) |
+
+All five require `verifyOwnership`-equivalent logic ported from
+`download_manager.go` (§6, same category+clientID check) rather than
+duplicated ad hoc.
+
+### 7.7 Frontend changes
+
+- **`streamer.js`** (or a new sibling module, mirroring `downloader.js`'s
+  shape): `listActiveTorrents(signal)`, `resumeTorrent(hash, signal)`,
+  `deleteTorrent(hash, signal)`, `moveToDownloads(hash, signal)`,
+  `flushTorrents(signal)` — each sends `X-Client-Id` via the reused
+  `getDownloadClientId()` (Assumption #6/Decision #34).
+- **`App.jsx`'s FAB gate** (line ~478): for `STREAM_ENGINE=qbittorrent`
+  specifically, changes from `streamingEnabled && sessions.size > 0` to
+  `streamingEnabled` alone (Decision #33). Requires the frontend to know
+  which engine is active — an addition to whatever the backend's `/api/config`
+  (or equivalent, mirroring `streamingCapabilityContext.jsx`'s existing
+  `getConfig()` call) exposes today, since neither existing capability
+  context currently surfaces the engine choice.
+- **`StatsModal.jsx`:** for the qBittorrent-engine case, replaces the
+  `useSessions()`-driven polling of individual `getStats(sessionId)` calls
+  with polling `listActiveTorrents()` instead, rendering paused entries
+  distinctly (e.g. a "Paused" chip alongside the existing seed-count/expired/
+  error chips already in `SessionCard`) and adding the three new per-item
+  action buttons plus a header-level Flush button. The anacrolix branch of
+  this component is untouched (Assumption #10/Decision #33) — this is a
+  conditional data-source-and-actions split within the existing component,
+  not a new one.
+
+### 7.8 Error handling & edge cases
+
+| Case | Behavior |
+|---|---|
+| Resume-by-hash with no matching `Manager.byInfohash` entry | Stale modal entry (e.g. the streamer restarted since the list was fetched, wiping in-memory bookkeeping per §7.1's non-goal) — surfaces as a clear "session no longer available, refresh" state in the modal rather than a silent failure |
+| `STREAM_ENGINE=anacrolix` | All five new endpoints in §7.6 404 from the mux (route never mounted), matching the existing `/download-api/*` pattern (§6.8) when a feature is off |
+| `verifyOwnership` failure (wrong/missing clientID) | Same posture as the Download Manager's existing check (§6) — request rejected, no information about *whose* torrent it actually is leaked |
+| Paused session's underlying qBittorrent torrent deleted out-of-band | Same `ErrTorrentGone`/`goneNotifiable` handling already built for the active-streaming case (§5.8) applies equally to a paused one |
+
+### 7.9 Testing strategy (prescriptive — nothing implemented yet)
+
+**Go (`streamer/`):** `manager_test.go` additions — idle session past
+`PauseTimeout` with `pausable` implemented → paused, kept in both maps, not
+`Drop()`'d; idle session past `PauseTimeout` without `pausable` (anacrolix) →
+today's unchanged `remove` behavior; paused session past `RetentionTimeout`
+→ finally removed; `STREAM_MAX_ACTIVE` cap counts only `active` sessions;
+infohash-reuse and direct-reconnect paths both call `Resume()` on a paused
+match. New `qbt_client_test.go` coverage for `Pause`/`Resume` API calls. New
+handler tests (mirroring `download_handlers_test.go`'s shape) for all five
+§7.6 endpoints, including the 404-when-anacrolix case and
+`verifyOwnership`-rejection case.
+
+**Frontend (Vitest + RTL):** `StatsModal.test.jsx` additions for the
+qBittorrent-engine branch (list-polling instead of per-session `getStats`,
+paused-chip rendering, all three per-item actions, Flush); confirm the
+anacrolix branch's existing tests are unaffected by the split.
+
+**Manual smoke checklist:** start a stream, let it idle past
+`STREAM_QBIT_PAUSE_TIMEOUT` → confirm qBittorrent shows the torrent paused,
+not gone → click Resume in the modal → playback resumes without
+re-downloading. Let a paused, complete download sit past
+`STREAM_QBIT_RETENTION_TIMEOUT` → confirm it's actually deleted. Use Move to
+Downloads on a paused item → confirm it appears in the Downloads modal (§6)
+and is no longer in the Active Streams one. Use Flush → confirm every
+torrent in `STREAM_QBIT_CATEGORY` tagged with this browser's clientID is
+gone, and a *different* browser's clientID-tagged torrent is untouched.

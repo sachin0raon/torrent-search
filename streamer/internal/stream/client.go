@@ -85,7 +85,7 @@ func NewAnacrolixClient(dataDir string, listenPort int, dhtStateFile string, hal
 	// On a server with an open listen port, more simultaneous outbound attempts
 	// means faster time-to-first-connection when most peers are behind NAT.
 	cfg.HalfOpenConnsPerTorrent = halfOpenConns
-	cfg.TotalHalfOpenConns = totalHalfOpenConns         // global cap shared across all torrents; default is 100
+	cfg.TotalHalfOpenConns = totalHalfOpenConns       // global cap shared across all torrents; default is 100
 	cfg.EstablishedConnsPerTorrent = establishedConns // default is 50; more connections = faster metadata
 	// uTP (UDP-based transport) bypasses VPS-level TCP throttling of BitTorrent
 	// traffic. UDP is confirmed unblocked. Risk: drops TCP-only peers, but

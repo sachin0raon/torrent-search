@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { streamer } from '../api/streamer.js';
 import { useSessions } from '../sessionContext.jsx';
+import { useQbtActiveStreamsEnabled } from '../qbtActiveStreamsContext.jsx';
+import { useDownloadsEnabled } from '../downloadCapabilityContext.jsx';
 import { fadeUp, spring } from '../motion.js';
 import { formatSize } from '../formatSize.js';
 
@@ -54,7 +56,161 @@ function SessionCard({ entry }) {
   );
 }
 
-export default function StatsModal({ onClose }) {
+// --- docs/STREAMING.md §7: qBittorrent-engine-only Active Streams view ---
+
+// Memoized with a field-level comparator (not React.memo's default shallow-
+// prop-equality), mirroring DownloadsModal.jsx's DownloadCard — `torrent` is
+// a brand-new object every 5s poll tick (a fresh JSON-parsed array from
+// listActiveTorrents) even when nothing about this particular torrent
+// changed, so a plain identity check would never skip a re-render. Requires
+// `onAction` to be a stable reference too (see QbtActiveStreamsView's
+// useCallback below), or the comparator would still see a "changed" prop on
+// every poll.
+const QbtTorrentCard = memo(function QbtTorrentCard({ torrent, downloadsEnabled, onAction, busy }) {
+  const { hash, name, progress, size, downloaded, paused } = torrent;
+  const pct = Math.min(100, Math.round((progress || 0) * 100));
+  return (
+    <div className="stats-session-card">
+      <div className="stats-session-header">
+        <span className="stats-session-name">{name}</span>
+        <div className="stats-session-chips">
+          {paused && <span className="stats-chip">Paused</span>}
+        </div>
+      </div>
+      <div className="stats-file-list">
+        <div className="stats-file-row">
+          <div className="stats-progress-bar">
+            <div className="stats-progress-fill" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="stats-file-meta">
+            {pct}% &middot; {formatSize(downloaded)} / {formatSize(size)}
+          </div>
+        </div>
+      </div>
+      <div className="stats-card-actions">
+        {paused && (
+          <button className="icon-btn" disabled={busy} onClick={() => onAction(hash, 'resume')}>
+            Resume
+          </button>
+        )}
+        {downloadsEnabled && (
+          <button className="icon-btn" disabled={busy} onClick={() => onAction(hash, 'move')}>
+            Move to Downloads
+          </button>
+        )}
+        <button className="icon-btn" disabled={busy} onClick={() => onAction(hash, 'delete')}>
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}, (prev, next) =>
+  prev.onAction === next.onAction &&
+  prev.downloadsEnabled === next.downloadsEnabled &&
+  prev.busy === next.busy &&
+  prev.torrent.hash === next.torrent.hash &&
+  prev.torrent.name === next.torrent.name &&
+  prev.torrent.progress === next.torrent.progress &&
+  prev.torrent.size === next.torrent.size &&
+  prev.torrent.downloaded === next.torrent.downloaded &&
+  prev.torrent.paused === next.torrent.paused);
+
+function QbtActiveStreamsView() {
+  const downloadsEnabled = useDownloadsEnabled();
+  const [torrents, setTorrents] = useState(null); // null = still loading
+  const [error, setError] = useState(false);
+  const [busyHash, setBusyHash] = useState(null);
+
+  // useCallback (no external dependencies — only stable setState calls and
+  // the streamer import) so it's safe to call from the other callbacks below
+  // without needing it in their own dependency arrays.
+  const refresh = useCallback(async (signal) => {
+    try {
+      const list = await streamer.listActiveTorrents(signal);
+      setTorrents(list || []);
+      setError(false);
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      setError(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    refresh(controller.signal);
+    const id = setInterval(() => refresh(controller.signal), POLL_INTERVAL);
+    return () => {
+      controller.abort();
+      clearInterval(id);
+    };
+  }, [refresh]);
+
+  // useCallback so QbtTorrentCard's memo comparator (above) sees a stable
+  // reference and can actually skip re-rendering unchanged cards on a poll
+  // tick, instead of busting on a fresh handler every render.
+  const handleAction = useCallback(async (hash, action) => {
+    setBusyHash(hash);
+    try {
+      if (action === 'resume') await streamer.resumeTorrent(hash);
+      else if (action === 'delete') await streamer.deleteTorrent(hash);
+      else if (action === 'move') await streamer.moveToDownloads(hash);
+      await refresh();
+    } catch {
+      setError(true);
+    } finally {
+      setBusyHash(null);
+    }
+  }, [refresh]);
+
+  const handleFlush = useCallback(async () => {
+    setBusyHash('*');
+    try {
+      await streamer.flushTorrents();
+      await refresh();
+    } catch {
+      setError(true);
+    } finally {
+      setBusyHash(null);
+    }
+  }, [refresh]);
+
+  return (
+    <>
+      <div className="stats-modal-body">
+        {torrents === null ? (
+          <div className="spinner" style={{ margin: '8px 0' }}>Loading…</div>
+        ) : torrents.length === 0 ? (
+          <div className="empty">No active streams.</div>
+        ) : (
+          <AnimatePresence initial={false}>
+            {torrents.map((t) => (
+              <motion.div key={t.hash} variants={fadeUp} initial="initial" animate="animate" exit="exit" transition={spring}>
+                <QbtTorrentCard
+                  torrent={t}
+                  downloadsEnabled={downloadsEnabled}
+                  onAction={handleAction}
+                  busy={busyHash === t.hash || busyHash === '*'}
+                />
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        )}
+        {error && <div className="stats-chip stats-chip-error">Couldn't reach the streaming service</div>}
+      </div>
+      {torrents && torrents.length > 0 && (
+        <div className="stats-card-actions">
+          <button className="icon-btn" disabled={busyHash !== null} onClick={handleFlush}>
+            Flush all
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+// --- anacrolix-engine fallback: today's local-session-only view, unchanged ---
+
+function LocalSessionsView() {
   const { sessions } = useSessions();
   // Map<sessionId, { name, seeders, files, expired, error }>
   const [statsMap, setStatsMap] = useState(() => {
@@ -114,6 +270,29 @@ export default function StatsModal({ onClose }) {
   const entries = Array.from(statsMap.entries()); // [sessionId, entry]
 
   return (
+    <div className="stats-modal-body">
+      {entries.length === 0 ? (
+        <div className="empty">No active streams.</div>
+      ) : (
+        <AnimatePresence initial={false}>
+          {entries.map(([sessionId, entry]) => (
+            <motion.div key={sessionId} variants={fadeUp} initial="initial" animate="animate" exit="exit" transition={spring}>
+              <SessionCard entry={entry} />
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      )}
+    </div>
+  );
+}
+
+export default function StatsModal({ onClose }) {
+  // qBittorrent engine gets a live, clientID-scoped view backed by the
+  // Active Streams panel endpoints (docs/STREAMING.md §7); anacrolix keeps
+  // today's local-session-only behavior unchanged (§7 Decision #33).
+  const qbtActiveStreamsEnabled = useQbtActiveStreamsEnabled();
+
+  return (
     <motion.div
       className="modal-backdrop"
       initial={{ opacity: 0 }}
@@ -139,19 +318,7 @@ export default function StatsModal({ onClose }) {
           </button>
         </div>
 
-        <div className="stats-modal-body">
-          {entries.length === 0 ? (
-            <div className="empty">No active streams.</div>
-          ) : (
-            <AnimatePresence initial={false}>
-              {entries.map(([sessionId, entry]) => (
-                <motion.div key={sessionId} variants={fadeUp} initial="initial" animate="animate" exit="exit" transition={spring}>
-                  <SessionCard entry={entry} />
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          )}
-        </div>
+        {qbtActiveStreamsEnabled ? <QbtActiveStreamsView /> : <LocalSessionsView />}
       </motion.div>
     </motion.div>
   );

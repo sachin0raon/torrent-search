@@ -365,6 +365,107 @@ func TestQbtTorrent_NotifyGone_FiresOnceEvenConcurrently(t *testing.T) {
 	}
 }
 
+// --- docs/STREAMING.md §7: Pause/Resume/TagClientID + clientLister ---
+
+func TestQbtTorrent_PauseResume(t *testing.T) {
+	fake := newFakeQbtAPI()
+	fake.torrents["cc"] = qbt.Torrent{Hash: "cc", State: qbt.TorrentStateDownloading}
+	tor := &qbtTorrent{hash: "cc", api: fake, refcounts: make(map[int]int)}
+
+	if err := tor.Pause(); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if fake.torrents["cc"].State != qbt.TorrentStatePausedDl {
+		t.Errorf("expected paused state, got %v", fake.torrents["cc"].State)
+	}
+
+	if err := tor.Resume(); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if fake.torrents["cc"].State != qbt.TorrentStateDownloading {
+		t.Errorf("expected downloading state after resume, got %v", fake.torrents["cc"].State)
+	}
+}
+
+func TestQbtTorrent_TagClientID(t *testing.T) {
+	fake := newFakeQbtAPI()
+	fake.torrents["cc"] = qbt.Torrent{Hash: "cc"}
+	tor := &qbtTorrent{hash: "cc", api: fake, refcounts: make(map[int]int)}
+
+	tor.TagClientID("browser-1")
+	calls := fake.getTagsCalls()
+	if len(calls) != 1 || calls[0].tags != "browser-1" || calls[0].hashes[0] != "cc" {
+		t.Errorf("expected one AddTagsCtx call for browser-1, got %v", calls)
+	}
+
+	tor.TagClientID("") // empty clientID must not call the API at all
+	if len(fake.getTagsCalls()) != 1 {
+		t.Error("empty clientID should not add a tag")
+	}
+}
+
+func TestQbtClient_ListTorrents(t *testing.T) {
+	fake := newFakeQbtAPI()
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Name: "Mine", Category: "tsa-stream-engine", Tags: "browser-1", State: qbt.TorrentStatePausedDl, Progress: 0.5}
+	fake.torrents["b"] = qbt.Torrent{Hash: "b", Name: "Theirs", Category: "tsa-stream-engine", Tags: "browser-2"}
+	c := &qbtClient{api: fake, category: "tsa-stream-engine"}
+
+	got, err := c.ListTorrents(t.Context(), "browser-1")
+	if err != nil {
+		t.Fatalf("ListTorrents: %v", err)
+	}
+	if len(got) != 1 || got[0].Hash != "a" || !got[0].Paused {
+		t.Errorf("expected only browser-1's paused torrent, got %+v", got)
+	}
+}
+
+func TestQbtClient_ResumeDeleteMove_VerifyOwnership(t *testing.T) {
+	fake := newFakeQbtAPI()
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Tags: "browser-1"}
+	c := &qbtClient{api: fake, category: "tsa-stream-engine"}
+	ctx := t.Context()
+
+	if err := c.ResumeTorrent(ctx, "a", "browser-2"); !errors.Is(err, ErrTorrentNotFound) {
+		t.Errorf("wrong owner: expected ErrTorrentNotFound, got %v", err)
+	}
+	if err := c.ResumeTorrent(ctx, "a", "browser-1"); err != nil {
+		t.Errorf("correct owner Resume: %v", err)
+	}
+
+	if err := c.DeleteTorrent(ctx, "a", "browser-2"); !errors.Is(err, ErrTorrentNotFound) {
+		t.Errorf("wrong owner: expected ErrTorrentNotFound, got %v", err)
+	}
+	if len(fake.deleteCalls) != 0 {
+		t.Error("delete must not be called for the wrong owner")
+	}
+
+	if err := c.MoveToCategory(ctx, "a", "browser-1", "tsa-download"); err != nil {
+		t.Fatalf("MoveToCategory: %v", err)
+	}
+	calls := fake.getCategoryCalls()
+	if len(calls) != 1 || calls[0].category != "tsa-download" || calls[0].hashes[0] != "a" {
+		t.Errorf("expected one SetCategoryCtx call to tsa-download, got %v", calls)
+	}
+}
+
+func TestQbtClient_FlushCategory(t *testing.T) {
+	fake := newFakeQbtAPI()
+	fake.torrents["a"] = qbt.Torrent{Hash: "a", Category: "tsa-stream-engine", Tags: "browser-1"}
+	fake.torrents["b"] = qbt.Torrent{Hash: "b", Category: "tsa-stream-engine", Tags: "browser-2"}
+	c := &qbtClient{api: fake, category: "tsa-stream-engine"}
+
+	removed, err := c.FlushCategory(t.Context(), "browser-1")
+	if err != nil {
+		t.Fatalf("FlushCategory: %v", err)
+	}
+	if len(removed) != 1 || removed[0] != "a" {
+		t.Errorf("expected only browser-1's torrent removed, got %v", removed)
+	}
+	if len(fake.deleteCalls) != 1 || len(fake.deleteCalls[0]) != 1 || fake.deleteCalls[0][0] != "a" {
+		t.Errorf("expected exactly one delete call for hash a, got %v", fake.deleteCalls)
+	}
+}
+
 func TestQbtTorrent_NotifyGone_NoCallbackRegisteredIsSafe(t *testing.T) {
 	tor := &qbtTorrent{hash: "nn", refcounts: make(map[int]int)}
 	tor.notifyGone() // must not panic when no callback was ever registered

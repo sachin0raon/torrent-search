@@ -71,6 +71,15 @@ type Config struct {
 	// QBitPollInterval is how often the qbittorrent engine polls for
 	// metadata-readiness and piece-state.
 	QBitPollInterval time.Duration
+	// QBitPauseTimeout is how long a qbittorrent-engine session may go idle
+	// before it is paused (download+upload stopped) rather than removed —
+	// docs/STREAMING.md §7.
+	QBitPauseTimeout time.Duration
+	// QBitRetentionTimeout is how long a paused qbittorrent-engine session may
+	// stay paused before it is actually removed, measured from when it was
+	// paused. Applies uniformly to complete and incomplete downloads
+	// (docs/STREAMING.md §7 Decision #30).
+	QBitRetentionTimeout time.Duration
 
 	// DownloadEngine enables the persistent download-manager feature when set
 	// to "qbittorrent". Empty (default) means the feature is entirely absent.
@@ -93,29 +102,31 @@ type Config struct {
 // anything unset.
 func LoadConfig() Config {
 	return Config{
-		MaxActive:       envInt("STREAM_MAX_ACTIVE", 5),
-		IdleTimeout:     envSeconds("STREAM_IDLE_TIMEOUT", 600),
-		MetadataTimeout: envSeconds("STREAM_METADATA_TIMEOUT", 45),
-		DownloadDir:     envStr("STREAM_DOWNLOAD_DIR", "/downloads"),
-		ListenAddr:      envStr("STREAM_LISTEN_ADDR", "127.0.0.1:8001"),
-		GCInterval:      envSeconds("STREAM_GC_INTERVAL", 30),
-		TrackersURLs:    trackerURLs(),
-		TrackersRefresh: envSeconds("STREAM_TRACKERS_REFRESH", 21600), // 6h
-		TrackersTimeout: envSeconds("STREAM_TRACKERS_TIMEOUT", 15),
-		TorrentPort:     envInt("STREAM_TORRENT_PORT", 6881),
+		MaxActive:                  envInt("STREAM_MAX_ACTIVE", 5),
+		IdleTimeout:                envSeconds("STREAM_IDLE_TIMEOUT", 600),
+		MetadataTimeout:            envSeconds("STREAM_METADATA_TIMEOUT", 45),
+		DownloadDir:                envStr("STREAM_DOWNLOAD_DIR", "/downloads"),
+		ListenAddr:                 envStr("STREAM_LISTEN_ADDR", "127.0.0.1:8001"),
+		GCInterval:                 envSeconds("STREAM_GC_INTERVAL", 30),
+		TrackersURLs:               trackerURLs(),
+		TrackersRefresh:            envSeconds("STREAM_TRACKERS_REFRESH", 21600), // 6h
+		TrackersTimeout:            envSeconds("STREAM_TRACKERS_TIMEOUT", 15),
+		TorrentPort:                envInt("STREAM_TORRENT_PORT", 6881),
 		HalfOpenConnsPerTorrent:    envInt("STREAM_HALF_OPEN_CONNS_PER_TORRENT", 100),
 		TotalHalfOpenConns:         envInt("STREAM_TOTAL_HALF_OPEN_CONNS", 500),
 		EstablishedConnsPerTorrent: envInt("STREAM_ESTABLISHED_CONNS_PER_TORRENT", 200),
-		DHTStateFile:    envStr("STREAM_DHT_STATE_FILE", "/data/dht-state.json"),
-		QBitHost:        envStr("STREAM_QBIT_HOST", ""),
-		QBitUser:        envStr("STREAM_QBIT_USER", "admin"),
-		QBitPass:        envStr("STREAM_QBIT_PASS", "adminadmin"),
+		DHTStateFile:               envStr("STREAM_DHT_STATE_FILE", "/data/dht-state.json"),
+		QBitHost:                   envStr("STREAM_QBIT_HOST", ""),
+		QBitUser:                   envStr("STREAM_QBIT_USER", "admin"),
+		QBitPass:                   envStr("STREAM_QBIT_PASS", "adminadmin"),
 
-		Engine:           envStr("STREAM_ENGINE", "anacrolix"),
-		QBitRemoteRoot:   envStr("STREAM_QBIT_REMOTE_ROOT", ""),
-		QBitDownloadDir:  envStr("STREAM_QBIT_DOWNLOAD_DIR", ""),
-		QBitCategory:     envStr("STREAM_QBIT_CATEGORY", "tsa-stream-engine"),
-		QBitPollInterval: envSeconds("STREAM_QBIT_POLL_INTERVAL", 1),
+		Engine:               envStr("STREAM_ENGINE", "anacrolix"),
+		QBitRemoteRoot:       envStr("STREAM_QBIT_REMOTE_ROOT", ""),
+		QBitDownloadDir:      envStr("STREAM_QBIT_DOWNLOAD_DIR", ""),
+		QBitCategory:         envStr("STREAM_QBIT_CATEGORY", "tsa-stream-engine"),
+		QBitPollInterval:     envSeconds("STREAM_QBIT_POLL_INTERVAL", 1),
+		QBitPauseTimeout:     envSeconds("STREAM_QBIT_PAUSE_TIMEOUT", 60),
+		QBitRetentionTimeout: envSeconds("STREAM_QBIT_RETENTION_TIMEOUT", 86400),
 
 		DownloadEngine:            envStr("DOWNLOAD_ENGINE", ""),
 		DownloadQBitCategory:      envStr("DOWNLOAD_QBIT_CATEGORY", "tsa-download"),

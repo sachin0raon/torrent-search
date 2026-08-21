@@ -39,6 +39,7 @@ type qbtAPI interface {
 	PauseCtx(ctx context.Context, hashes []string) error
 	ResumeCtx(ctx context.Context, hashes []string) error
 	AddTagsCtx(ctx context.Context, hashes []string, tags string) error
+	SetCategoryCtx(ctx context.Context, hashes []string, category string) error
 }
 
 // --- qBittorrent engine adapter (TorrentClient) ---
@@ -152,6 +153,135 @@ func (c *qbtClient) AddMagnet(uri string) (Torrent, error) {
 }
 
 func (c *qbtClient) Close() {}
+
+// verifyOwnership confirms hash is tagged with clientID before a mutating
+// call acts on it — mirrors download_manager.go's identical check (§6),
+// reused for the streaming engine's Active Streams panel (docs/STREAMING.md
+// §7). A hash isn't secret (it's visible in every player/stream link), so
+// without this a browser that merely learned another session's hash could
+// still act on it directly even though List itself is scoped. An empty
+// clientID (header not sent) skips the tag check, same no-scoping fallback
+// as the download manager.
+func (c *qbtClient) verifyOwnership(ctx context.Context, hash, clientID string) error {
+	checkCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+	defer cancel()
+	torrents, err := c.api.GetTorrentsCtx(checkCtx, qbt.TorrentFilterOptions{Hashes: []string{hash}, Tag: clientID})
+	if err != nil {
+		return fmt.Errorf("qbt: verify ownership: %w", err)
+	}
+	if len(torrents) == 0 {
+		return ErrTorrentNotFound
+	}
+	return nil
+}
+
+// isPausedState reports whether a qBittorrent torrent state represents a
+// paused/stopped torrent — covers both the older pausedUP/pausedDL naming
+// and newer qBittorrent (v5+) versions that renamed "pause" to "stop".
+func isPausedState(s qbt.TorrentState) bool {
+	switch s {
+	case qbt.TorrentStatePausedUp, qbt.TorrentStatePausedDl,
+		qbt.TorrentStateStoppedUp, qbt.TorrentStateStoppedDl:
+		return true
+	default:
+		return false
+	}
+}
+
+// ListTorrents implements clientLister: every torrent in this engine's
+// category, scoped to clientID, for the Active Streams panel
+// (docs/STREAMING.md §7.6).
+func (c *qbtClient) ListTorrents(ctx context.Context, clientID string) ([]TorrentSummary, error) {
+	listCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+	defer cancel()
+	torrents, err := c.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Category: c.category, Tag: clientID})
+	if err != nil {
+		return nil, fmt.Errorf("qbt: list torrents: %w", err)
+	}
+	out := make([]TorrentSummary, len(torrents))
+	for i, t := range torrents {
+		out[i] = TorrentSummary{
+			Hash:       t.Hash,
+			Name:       t.Name,
+			Progress:   t.Progress,
+			Size:       t.Size,
+			Downloaded: t.Downloaded,
+			Paused:     isPausedState(t.State),
+		}
+	}
+	return out, nil
+}
+
+// ResumeTorrent implements clientLister: resumes a paused torrent by hash,
+// after verifying clientID ownership.
+func (c *qbtClient) ResumeTorrent(ctx context.Context, hash, clientID string) error {
+	if err := c.verifyOwnership(ctx, hash, clientID); err != nil {
+		return err
+	}
+	resumeCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+	defer cancel()
+	if err := c.api.ResumeCtx(resumeCtx, []string{hash}); err != nil {
+		return fmt.Errorf("qbt: resume: %w", err)
+	}
+	return nil
+}
+
+// DeleteTorrent implements clientLister: removes a torrent and its data by
+// hash, after verifying clientID ownership — the "Delete now" action that
+// skips the retention grace period (docs/STREAMING.md §7.6).
+func (c *qbtClient) DeleteTorrent(ctx context.Context, hash, clientID string) error {
+	if err := c.verifyOwnership(ctx, hash, clientID); err != nil {
+		return err
+	}
+	delCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+	defer cancel()
+	if err := c.api.DeleteTorrentsCtx(delCtx, []string{hash}, true); err != nil {
+		return fmt.Errorf("qbt: delete: %w", err)
+	}
+	return nil
+}
+
+// MoveToCategory implements clientLister: recategorizes a torrent (e.g. to
+// the download-manager's category), after verifying clientID ownership — a
+// cheap, data-preserving handoff, not a delete-and-re-add (docs/STREAMING.md
+// §7 Decision #35).
+func (c *qbtClient) MoveToCategory(ctx context.Context, hash, clientID, targetCategory string) error {
+	if err := c.verifyOwnership(ctx, hash, clientID); err != nil {
+		return err
+	}
+	catCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+	defer cancel()
+	if err := c.api.SetCategoryCtx(catCtx, []string{hash}, targetCategory); err != nil {
+		return fmt.Errorf("qbt: move to category: %w", err)
+	}
+	return nil
+}
+
+// FlushCategory implements clientLister: deletes every torrent in this
+// engine's category matching clientID (empty clientID flushes the whole
+// category). Returns the removed hashes so Manager can also drop any
+// matching in-memory sessions.
+func (c *qbtClient) FlushCategory(ctx context.Context, clientID string) ([]string, error) {
+	listCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+	torrents, err := c.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Category: c.category, Tag: clientID})
+	cancel()
+	if err != nil {
+		return nil, fmt.Errorf("qbt: flush list: %w", err)
+	}
+	if len(torrents) == 0 {
+		return nil, nil
+	}
+	hashes := make([]string, len(torrents))
+	for i, t := range torrents {
+		hashes[i] = t.Hash
+	}
+	delCtx, delCancel := context.WithTimeout(ctx, apiTimeout)
+	defer delCancel()
+	if err := c.api.DeleteTorrentsCtx(delCtx, hashes, true); err != nil {
+		return nil, fmt.Errorf("qbt: flush delete: %w", err)
+	}
+	return hashes, nil
+}
 
 // parseMagnetInfohash extracts the lowercase-hex SHA1 infohash from a magnet's
 // xt=urn:btih:... parameter — hex (40 chars) as-is, base32 (32 chars) decoded.
@@ -383,6 +513,39 @@ func (t *qbtTorrent) Drop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
 	return t.api.DeleteTorrentsCtx(ctx, []string{t.hash}, true)
+}
+
+// Pause implements pausable: stops both download and upload for this torrent
+// without removing it (docs/STREAMING.md §7 Assumption #2).
+func (t *qbtTorrent) Pause() error {
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+	return t.api.PauseCtx(ctx, []string{t.hash})
+}
+
+// Resume implements pausable: restarts a previously paused torrent.
+func (t *qbtTorrent) Resume() error {
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+	return t.api.ResumeCtx(ctx, []string{t.hash})
+}
+
+// TagClientID implements clientIDTaggable: tags this torrent with the
+// requesting browser's clientID (qBittorrent's own per-torrent tag,
+// additive — go-qbittorrent's AddTagsCtx never replaces existing tags), so
+// the Active Streams panel can later scope its qBittorrent queries to "this
+// browser's sessions" (docs/STREAMING.md §7 Assumption #6/#7). Best-effort:
+// a tagging failure is logged, not fatal — the session still streams fine,
+// it just won't show up in a clientID-scoped list until a later retry.
+func (t *qbtTorrent) TagClientID(clientID string) {
+	if clientID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+	if err := t.api.AddTagsCtx(ctx, []string{t.hash}, clientID); err != nil {
+		log.Printf("streamer: qbt tag client id hash=%.8s: %v", t.hash, err)
+	}
 }
 
 // PrioritizeFile implements filePrioritizer: it promotes index to normal

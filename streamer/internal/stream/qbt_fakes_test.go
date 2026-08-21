@@ -42,6 +42,14 @@ type fakeQbtAPI struct {
 
 	deleteCalls [][]string
 	deleteErr   error
+
+	categoryCalls []categoryCall
+	categoryErr   error
+}
+
+type categoryCall struct {
+	hashes   []string
+	category string
 }
 
 type priorityCall struct {
@@ -173,8 +181,56 @@ func (f *fakeQbtAPI) DeleteTorrentsCtx(ctx context.Context, hashes []string, del
 	return nil
 }
 
-func (f *fakeQbtAPI) PauseCtx(_ context.Context, _ []string) error  { return nil }
-func (f *fakeQbtAPI) ResumeCtx(_ context.Context, _ []string) error { return nil }
+func (f *fakeQbtAPI) PauseCtx(_ context.Context, hashes []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, h := range hashes {
+		if t, ok := f.torrents[h]; ok {
+			t.State = qbt.TorrentStatePausedDl
+			f.torrents[h] = t
+		}
+	}
+	return nil
+}
+
+func (f *fakeQbtAPI) ResumeCtx(_ context.Context, hashes []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, h := range hashes {
+		if t, ok := f.torrents[h]; ok {
+			t.State = qbt.TorrentStateDownloading
+			f.torrents[h] = t
+		}
+	}
+	return nil
+}
+
+// SetCategoryCtx records each call and, mirroring real qBittorrent, moves the
+// torrent into the new category — used to assert Move to Downloads actually
+// recategorizes rather than only calling the API.
+func (f *fakeQbtAPI) SetCategoryCtx(ctx context.Context, hashes []string, category string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.categoryErr != nil {
+		return f.categoryErr
+	}
+	f.categoryCalls = append(f.categoryCalls, categoryCall{hashes, category})
+	for _, h := range hashes {
+		if t, ok := f.torrents[h]; ok {
+			t.Category = category
+			f.torrents[h] = t
+		}
+	}
+	return nil
+}
+
+func (f *fakeQbtAPI) getCategoryCalls() []categoryCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]categoryCall, len(f.categoryCalls))
+	copy(out, f.categoryCalls)
+	return out
+}
 
 // AddTagsCtx mirrors real qBittorrent's additive semantics: it appends to
 // whatever tags a torrent already has rather than replacing them, so a

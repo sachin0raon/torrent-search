@@ -94,6 +94,8 @@ Open http://localhost:5173.
 | `STREAM_QBIT_DOWNLOAD_DIR` | env | Local filesystem root the streamer container sees for that same directory (the bind-mount target). **Required** when `STREAM_ENGINE=qbittorrent` or `DOWNLOAD_ENGINE=qbittorrent`; validated at startup. |
 | `STREAM_QBIT_CATEGORY` | env | qBittorrent category tag applied to torrents the **streaming** qbittorrent engine adds (default `tsa-stream-engine`); purged on every startup for a clean slate. |
 | `STREAM_QBIT_POLL_INTERVAL` | env | Seconds between metadata-readiness and piece-state polls; shared by both the streaming and download engines (default `1`). |
+| `STREAM_QBIT_PAUSE_TIMEOUT` | env | Seconds a **streaming** qbittorrent-engine session may go idle before it's paused (download+upload stopped) rather than removed (default `60`). Resumable via a fresh Stream click, a reconnect, or the Active Streams panel. See [docs/STREAMING.md §7](docs/STREAMING.md). |
+| `STREAM_QBIT_RETENTION_TIMEOUT` | env | Seconds a **paused** streaming session may stay paused, measured from when it was paused, before it's actually removed (default `86400` = 1 day). Applies the same to complete and incomplete downloads. See [docs/STREAMING.md §7](docs/STREAMING.md). |
 | `DOWNLOAD_QBIT_CATEGORY` | env | qBittorrent category tag applied to torrents the **download-manager** feature adds (default `tsa-download`). **Never** purged on startup — downloads are intentionally persistent. See [docs/STREAMING.md §6](docs/STREAMING.md). |
 | `DOWNLOAD_UNSELECTED_TIMEOUT` | env | Seconds a download-manager torrent may sit with **no file ever selected** (e.g. opened the file picker, never picked anything) before it's automatically removed from qBittorrent (default `900` = 15 min). A torrent with at least one selected file is never touched by this, regardless of age. See [docs/STREAMING.md §6](docs/STREAMING.md). |
 
@@ -147,6 +149,8 @@ docker run --rm -p 8000:8080 \
   -e STREAM_QBIT_DOWNLOAD_DIR=/downloads \
   -e STREAM_QBIT_CATEGORY=tsa-stream-engine \
   -e STREAM_QBIT_POLL_INTERVAL=1 \
+  -e STREAM_QBIT_PAUSE_TIMEOUT=60 \
+  -e STREAM_QBIT_RETENTION_TIMEOUT=86400 \
   -e DOWNLOAD_QBIT_CATEGORY=tsa-download \
   -e DOWNLOAD_UNSELECTED_TIMEOUT=900 \
   -v tsa_config:/data \

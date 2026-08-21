@@ -35,4 +35,52 @@ describe('streamer api', () => {
       status: 409,
     });
   });
+
+  // --- docs/STREAMING.md §7: Active Streams panel (qBittorrent engine only) ---
+
+  it('lists active torrents with the shared clientID header', async () => {
+    global.fetch = mockFetch(200, [{ hash: 'AAA', name: 'M', progress: 0.5, paused: true }]);
+    const list = await streamer.listActiveTorrents();
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/stream-api/torrents');
+    expect(opts.headers['X-Client-Id']).toBeTruthy();
+    expect(list[0].hash).toBe('AAA');
+  });
+
+  it('resumes a torrent by hash', async () => {
+    global.fetch = mockFetch(204, null);
+    await streamer.resumeTorrent('AAA');
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/stream-api/torrents/AAA/resume');
+    expect(opts.method).toBe('POST');
+  });
+
+  it('deletes a torrent by hash', async () => {
+    global.fetch = mockFetch(204, null);
+    await streamer.deleteTorrent('AAA');
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/stream-api/torrents/AAA');
+    expect(opts.method).toBe('DELETE');
+  });
+
+  it('moves a torrent to downloads', async () => {
+    global.fetch = mockFetch(204, null);
+    await streamer.moveToDownloads('AAA');
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/stream-api/torrents/AAA/move-to-downloads');
+    expect(opts.method).toBe('POST');
+  });
+
+  it('flushes every torrent for this browser', async () => {
+    global.fetch = mockFetch(204, null);
+    await streamer.flushTorrents();
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/stream-api/torrents');
+    expect(opts.method).toBe('DELETE');
+  });
+
+  it('surfaces a 404 (engine does not support the panel) with its status', async () => {
+    global.fetch = mockFetch(404, { error: 'not found' });
+    await expect(streamer.listActiveTorrents()).rejects.toMatchObject({ status: 404 });
+  });
 });

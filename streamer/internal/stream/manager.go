@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -26,6 +27,15 @@ var (
 	ErrMetadataTimeout = errors.New("timed out fetching torrent metadata")
 	ErrNotFound        = errors.New("session not found")
 	ErrFileIndex       = errors.New("file index out of range")
+	// ErrTorrentNotFound is returned by the clientLister-backed hash operations
+	// (List/Resume/Delete/MoveToDownloads) when no matching, clientID-owned
+	// torrent exists — docs/STREAMING.md §7.
+	ErrTorrentNotFound = errors.New("torrent not found")
+	// ErrNotSupported is returned by the clientLister-backed Manager methods
+	// when the active engine doesn't implement clientLister (e.g. anacrolix) —
+	// docs/STREAMING.md §7 Assumption/Constraint that this feature is
+	// qBittorrent-engine-only.
+	ErrNotSupported = errors.New("not supported by the active engine")
 )
 
 // FileInfo describes one file within a torrent for the API/UI.
@@ -52,6 +62,19 @@ type SessionStats struct {
 	Files     []FileProgress `json:"files"`
 }
 
+// TorrentSummary describes one torrent in the qBittorrent engine's category,
+// for the Active Streams panel (docs/STREAMING.md §7.6) — sourced from a
+// fresh qBittorrent query, not Manager's in-memory session state (§7
+// Decision #32), so it deliberately doesn't carry a session id.
+type TorrentSummary struct {
+	Hash       string  `json:"hash"`
+	Name       string  `json:"name"`
+	Progress   float64 `json:"progress"`
+	Size       int64   `json:"size"`
+	Downloaded int64   `json:"downloaded"`
+	Paused     bool    `json:"paused"`
+}
+
 // Session is one active torrent.
 type Session struct {
 	ID       string
@@ -64,6 +87,13 @@ type Session struct {
 	// ready and files are guarded by the owning Manager's mu.
 	ready bool
 	files []FileInfo
+
+	// paused and pausedAt implement the three-state lifecycle (active/paused/
+	// gone) for engines implementing pausable — docs/STREAMING.md §7. Guarded
+	// by the owning Manager's mu. pausedAt is unix nanoseconds, valid only
+	// when paused is true.
+	paused   bool
+	pausedAt int64
 }
 
 func (s *Session) touch(now time.Time) { s.lastRead.Store(now.UnixNano()) }
@@ -138,8 +168,11 @@ func (m *Manager) WipeDownloadDir() error {
 
 // AddSession adds a magnet (or returns the existing session for its infohash),
 // waits for metadata under ctx, and returns the ready session. The caller is
-// responsible for giving ctx the metadata timeout.
-func (m *Manager) AddSession(ctx context.Context, magnet string) (*Session, error) {
+// responsible for giving ctx the metadata timeout. clientID (empty if the
+// requesting browser sent none) tags the underlying torrent on engines that
+// support it, so the Active Streams panel can later find it
+// (docs/STREAMING.md §7).
+func (m *Manager) AddSession(ctx context.Context, magnet, clientID string) (*Session, error) {
 	if len(magnet) < 8 || magnet[:8] != "magnet:?" {
 		return nil, ErrInvalidMagnet
 	}
@@ -157,14 +190,24 @@ func (m *Manager) AddSession(ctx context.Context, magnet string) (*Session, erro
 		m.mu.Unlock()
 		s.touch(m.now())
 		log.Printf("streamer: reusing session %s name=%q", id, s.Name)
+		if err := m.resumeIfPaused(s); err != nil {
+			log.Printf("streamer: session %s resume-on-reuse failed: %v", s.ID, err)
+			return nil, err
+		}
+		// Additive tagging (mirrors download_manager.go's AddTorrent): a second
+		// browser reusing a session another browser started still gains
+		// visibility into it via its own clientID.
+		if tg, ok := s.t.(clientIDTaggable); ok {
+			tg.TagClientID(clientID)
+		}
 		if err := m.awaitInfo(ctx, s); err != nil {
 			return nil, err
 		}
 		return s, nil
 	}
 
-	if len(m.sessions) >= m.cfg.MaxActive {
-		log.Printf("streamer: at capacity (%d/%d), rejected magnet", len(m.sessions), m.cfg.MaxActive)
+	if m.activeCountLocked() >= m.cfg.MaxActive {
+		log.Printf("streamer: at capacity (%d/%d), rejected magnet", m.activeCountLocked(), m.cfg.MaxActive)
 		if err := t.Drop(); err != nil {
 			// This torrent was never tracked in a Session, so there's nothing to
 			// retry against; best-effort only (matches the untracked nature of a
@@ -180,6 +223,10 @@ func (m *Manager) AddSession(ctx context.Context, magnet string) (*Session, erro
 	m.sessions[s.ID] = s
 	m.byInfohash[ih] = s.ID
 	m.mu.Unlock()
+
+	if tg, ok := s.t.(clientIDTaggable); ok {
+		tg.TagClientID(clientID)
+	}
 
 	// Engines that can detect their underlying torrent was deleted out-of-band
 	// (e.g. the qBittorrent engine, directly via qBittorrent's own UI, not
@@ -367,6 +414,10 @@ func (m *Manager) OpenFile(id string, index int) (Reader, FileInfo, error) {
 	}
 	m.mu.Unlock()
 
+	if err := m.resumeIfPaused(s); err != nil {
+		return nil, FileInfo{}, fmt.Errorf("resume session: %w", err)
+	}
+
 	s.touch(m.now())
 	// Engines that support downloading only the picked file (e.g. the qBittorrent
 	// engine, for season-pack bandwidth efficiency) implement this optional
@@ -391,6 +442,34 @@ type filePrioritizer interface{ PrioritizeFile(index int) }
 // same failure again.
 type goneNotifiable interface{ SetGoneCallback(func()) }
 
+// pausable is implemented by engines that can suspend a torrent without
+// removing it (e.g. the qBittorrent engine). collectIdle type-asserts this to
+// decide between the three-state (active/paused/gone) lifecycle and today's
+// binary (active/gone) one anacrolix still uses (docs/STREAMING.md §7
+// Decision #27).
+type pausable interface {
+	Pause() error
+	Resume() error
+}
+
+// clientIDTaggable is implemented by engines that can tag a torrent with the
+// requesting browser's clientID, so it can later be found by a
+// clientID-scoped clientLister query (docs/STREAMING.md §7 Assumption #6).
+type clientIDTaggable interface{ TagClientID(clientID string) }
+
+// clientLister is implemented by engines that can enumerate and manage their
+// own category-tagged torrents directly against the backing client (e.g. the
+// qBittorrent engine), powering the Active Streams panel's qBittorrent-aware
+// view (docs/STREAMING.md §7.6). anacrolix doesn't implement this — Manager's
+// methods below return ErrNotSupported when it's absent.
+type clientLister interface {
+	ListTorrents(ctx context.Context, clientID string) ([]TorrentSummary, error)
+	ResumeTorrent(ctx context.Context, hash, clientID string) error
+	DeleteTorrent(ctx context.Context, hash, clientID string) error
+	MoveToCategory(ctx context.Context, hash, clientID, targetCategory string) error
+	FlushCategory(ctx context.Context, clientID string) ([]string, error)
+}
+
 // touchReader wraps a Reader and pings onRead whenever bytes are read, so an
 // active stream keeps its session's idle timer fresh for its whole duration.
 type touchReader struct {
@@ -404,6 +483,171 @@ func (t *touchReader) Read(p []byte) (int, error) {
 		t.onRead()
 	}
 	return n, err
+}
+
+// activeCountLocked counts non-paused sessions. Must be called with m.mu
+// already held. Paused sessions don't count against MaxActive — an
+// idle-but-retained torrent shouldn't block a new stream from starting
+// (docs/STREAMING.md §7 Decision #29).
+func (m *Manager) activeCountLocked() int {
+	n := 0
+	for _, s := range m.sessions {
+		if !s.paused {
+			n++
+		}
+	}
+	return n
+}
+
+// resumeIfPaused resumes s if it's currently paused, clearing the paused
+// state on success. Covers the two resume paths that reach a session
+// directly rather than through the clientLister-backed hash operations:
+// infohash-reuse (AddSession) and a direct reconnect to a still-known
+// session id (OpenFile) — docs/STREAMING.md §7.5.
+func (m *Manager) resumeIfPaused(s *Session) error {
+	m.mu.Lock()
+	paused := s.paused
+	m.mu.Unlock()
+	if !paused {
+		return nil
+	}
+	p, ok := s.t.(pausable)
+	if !ok {
+		return nil // defensive: only pausable sessions are ever marked paused
+	}
+	if err := p.Resume(); err != nil {
+		return fmt.Errorf("resume session: %w", err)
+	}
+	m.mu.Lock()
+	s.paused = false
+	s.pausedAt = 0
+	m.mu.Unlock()
+	log.Printf("streamer: session %s resumed name=%q", s.ID, s.Name)
+	return nil
+}
+
+// pauseSession pauses a session's underlying torrent and marks it paused in
+// Manager's bookkeeping, keeping it in the session maps (unlike remove) so
+// it remains resumable — docs/STREAMING.md §7. A failed Pause() call is
+// logged and left for the next GC tick to retry, rather than marking it
+// paused when the underlying torrent might still be actively
+// downloading/seeding.
+func (m *Manager) pauseSession(s *Session) {
+	p, ok := s.t.(pausable)
+	if !ok {
+		return
+	}
+	if err := p.Pause(); err != nil {
+		log.Printf("streamer: session %s pause failed, will retry next tick: %v", s.ID, err)
+		return
+	}
+	m.mu.Lock()
+	s.paused = true
+	s.pausedAt = m.now().UnixNano()
+	m.mu.Unlock()
+	log.Printf("streamer: session %s paused (idle) name=%q", s.ID, s.Name)
+}
+
+// ListTorrents returns every torrent in the qBittorrent engine's category
+// scoped to clientID, for the Active Streams panel (docs/STREAMING.md §7.6).
+// Returns ErrNotSupported if the active engine doesn't implement
+// clientLister (i.e. anacrolix).
+func (m *Manager) ListTorrents(ctx context.Context, clientID string) ([]TorrentSummary, error) {
+	cl, ok := m.client.(clientLister)
+	if !ok {
+		return nil, ErrNotSupported
+	}
+	return cl.ListTorrents(ctx, clientID)
+}
+
+// ResumeTorrentByHash resumes a torrent by its qBittorrent hash — the Active
+// Streams panel's explicit Resume action — and syncs Manager's own
+// bookkeeping if it has a tracked session for that hash, so a subsequent
+// direct reconnect doesn't attempt to resume it again (docs/STREAMING.md
+// §7.5/§7.6).
+func (m *Manager) ResumeTorrentByHash(ctx context.Context, hash, clientID string) error {
+	cl, ok := m.client.(clientLister)
+	if !ok {
+		return ErrNotSupported
+	}
+	if err := cl.ResumeTorrent(ctx, hash, clientID); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	if id, ok := m.byInfohash[hash]; ok {
+		if s, ok := m.sessions[id]; ok {
+			s.paused = false
+			s.pausedAt = 0
+		}
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+// DeleteTorrentByHash deletes a torrent by hash immediately, skipping the
+// retention grace period, syncing Manager's own bookkeeping if it has a
+// tracked session for that hash (docs/STREAMING.md §7.6).
+func (m *Manager) DeleteTorrentByHash(ctx context.Context, hash, clientID string) error {
+	cl, ok := m.client.(clientLister)
+	if !ok {
+		return ErrNotSupported
+	}
+	if err := cl.DeleteTorrent(ctx, hash, clientID); err != nil {
+		return err
+	}
+	m.forgetByHash(hash)
+	return nil
+}
+
+// MoveToDownloads recategorizes a torrent to the download-manager's category
+// and drops it from Manager's own tracking, without deleting its data —
+// ownership transfers to the Download Manager (docs/STREAMING.md §7 Decision
+// #35).
+func (m *Manager) MoveToDownloads(ctx context.Context, hash, clientID, downloadCategory string) error {
+	cl, ok := m.client.(clientLister)
+	if !ok {
+		return ErrNotSupported
+	}
+	if err := cl.MoveToCategory(ctx, hash, clientID, downloadCategory); err != nil {
+		return err
+	}
+	m.forgetByHash(hash)
+	return nil
+}
+
+// Flush deletes every torrent in the qBittorrent engine's category matching
+// clientID (empty clientID flushes the whole category), syncing Manager's
+// own bookkeeping for any of them that were tracked (docs/STREAMING.md
+// §7.6).
+func (m *Manager) Flush(ctx context.Context, clientID string) error {
+	cl, ok := m.client.(clientLister)
+	if !ok {
+		return ErrNotSupported
+	}
+	removed, err := cl.FlushCategory(ctx, clientID)
+	if err != nil {
+		return err
+	}
+	for _, hash := range removed {
+		m.forgetByHash(hash)
+	}
+	return nil
+}
+
+// forgetByHash removes a session from Manager's bookkeeping by infohash
+// without calling Drop() — the underlying torrent has already been deleted
+// or handed off to another category by the caller, so no further cleanup
+// call is needed (and for MoveToDownloads, the data must specifically NOT be
+// deleted).
+func (m *Manager) forgetByHash(hash string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id, ok := m.byInfohash[hash]
+	if !ok {
+		return
+	}
+	delete(m.sessions, id)
+	delete(m.byInfohash, hash)
 }
 
 // Remove stops and deletes a session by id (explicit stop).
@@ -485,21 +729,45 @@ func (m *Manager) StartGC() {
 	}()
 }
 
-// collectIdle drops every session idle longer than the configured timeout.
+// collectIdle runs the idle-GC sweep. Sessions on an engine implementing
+// pausable (the qBittorrent engine) get a three-state lifecycle: idle past
+// QBitPauseTimeout → paused, not removed; already paused past
+// QBitRetentionTimeout (measured from when it was paused, uniformly for
+// complete and incomplete downloads — Decision #30) → finally removed.
+// Sessions on an engine without pausable (anacrolix) keep today's exact
+// binary behavior: idle past IdleTimeout → removed directly
+// (docs/STREAMING.md §7 Decision #27).
 func (m *Manager) collectIdle() {
 	now := m.now()
-	cutoff := now.Add(-m.cfg.IdleTimeout).UnixNano()
+	idleCutoff := now.Add(-m.cfg.IdleTimeout).UnixNano()
+	pauseCutoff := now.Add(-m.cfg.QBitPauseTimeout).UnixNano()
+	retentionCutoff := now.Add(-m.cfg.QBitRetentionTimeout).UnixNano()
 
 	m.mu.Lock()
-	var stale []*Session
+	var toRemove, toPause []*Session
 	for _, s := range m.sessions {
-		if s.lastRead.Load() < cutoff {
-			stale = append(stale, s)
+		if s.paused {
+			if s.pausedAt < retentionCutoff {
+				toRemove = append(toRemove, s)
+			}
+			continue
+		}
+		if _, ok := s.t.(pausable); ok {
+			if s.lastRead.Load() < pauseCutoff {
+				toPause = append(toPause, s)
+			}
+			continue
+		}
+		if s.lastRead.Load() < idleCutoff {
+			toRemove = append(toRemove, s)
 		}
 	}
 	m.mu.Unlock()
 
-	for _, s := range stale {
+	for _, s := range toPause {
+		m.pauseSession(s)
+	}
+	for _, s := range toRemove {
 		log.Printf("streamer: session %s idle-expired name=%q", s.ID, s.Name)
 		m.remove(s)
 	}

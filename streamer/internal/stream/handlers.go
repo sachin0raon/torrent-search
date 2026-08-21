@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"mime"
 	"net/http"
@@ -42,6 +43,15 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /stream-api/sessions/{id}", h.getSession)
 	mux.HandleFunc("GET /stream-api/sessions/{id}/stats", h.getSessionStats)
 	mux.HandleFunc("DELETE /stream-api/sessions/{id}", h.deleteSession)
+	if h.mgr != nil {
+		if _, ok := h.mgr.client.(clientLister); ok {
+			mux.HandleFunc("GET /stream-api/torrents", h.listTorrents)
+			mux.HandleFunc("POST /stream-api/torrents/{hash}/resume", h.resumeTorrent)
+			mux.HandleFunc("DELETE /stream-api/torrents/{hash}", h.deleteTorrent)
+			mux.HandleFunc("POST /stream-api/torrents/{hash}/move-to-downloads", h.moveTorrentToDownloads)
+			mux.HandleFunc("DELETE /stream-api/torrents", h.flushTorrents)
+		}
+	}
 	mux.HandleFunc("GET /stream/{id}/{index}/{filename...}", h.streamFile)
 	// Some players (e.g. MX Player) strip the filename from the URL and request
 	// just /{id}/{index}. Serve directly from this pattern to avoid the 301
@@ -75,7 +85,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r, h.cfg.MetadataTimeout)
 	defer cancel()
 
-	s, err := h.mgr.AddSession(ctx, strings.TrimSpace(req.Magnet))
+	s, err := h.mgr.AddSession(ctx, strings.TrimSpace(req.Magnet), clientID(r))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidMagnet):
@@ -153,6 +163,79 @@ func (h *Handler) streamFile(w http.ResponseWriter, r *http.Request) {
 	// ServeContent handles Range/If-Range parsing, 206 responses and
 	// Accept-Ranges using the reader's Seek to discover the size.
 	http.ServeContent(w, r, name, time.Time{}, reader)
+}
+
+// listTorrents, resumeTorrent, deleteTorrent, moveTorrentToDownloads, and
+// flushTorrents power the Active Streams panel (docs/STREAMING.md §7.6) —
+// mounted only when the active engine implements clientLister (i.e.
+// qBittorrent), see Routes().
+
+func (h *Handler) listTorrents(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := contextWithTimeout(r, downloadAPITimeout)
+	defer cancel()
+	list, err := h.mgr.ListTorrents(ctx, clientID(r))
+	if err != nil {
+		log.Printf("streamer: list torrents: %v", err)
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (h *Handler) resumeTorrent(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := contextWithTimeout(r, downloadAPITimeout)
+	defer cancel()
+	if err := h.mgr.ResumeTorrentByHash(ctx, r.PathValue("hash"), clientID(r)); err != nil {
+		if errors.Is(err, ErrTorrentNotFound) {
+			writeError(w, http.StatusNotFound, "torrent not found")
+			return
+		}
+		log.Printf("streamer: resume torrent hash=%s: %v", r.PathValue("hash"), err)
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) deleteTorrent(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := contextWithTimeout(r, downloadAPITimeout)
+	defer cancel()
+	if err := h.mgr.DeleteTorrentByHash(ctx, r.PathValue("hash"), clientID(r)); err != nil {
+		if errors.Is(err, ErrTorrentNotFound) {
+			writeError(w, http.StatusNotFound, "torrent not found")
+			return
+		}
+		log.Printf("streamer: delete torrent hash=%s: %v", r.PathValue("hash"), err)
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) moveTorrentToDownloads(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := contextWithTimeout(r, downloadAPITimeout)
+	defer cancel()
+	if err := h.mgr.MoveToDownloads(ctx, r.PathValue("hash"), clientID(r), h.cfg.DownloadQBitCategory); err != nil {
+		if errors.Is(err, ErrTorrentNotFound) {
+			writeError(w, http.StatusNotFound, "torrent not found")
+			return
+		}
+		log.Printf("streamer: move torrent to downloads hash=%s: %v", r.PathValue("hash"), err)
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) flushTorrents(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := contextWithTimeout(r, downloadAPITimeout)
+	defer cancel()
+	if err := h.mgr.Flush(ctx, clientID(r)); err != nil {
+		log.Printf("streamer: flush torrents: %v", err)
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("qbittorrent unavailable: %v", err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {

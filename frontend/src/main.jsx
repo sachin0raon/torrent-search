@@ -4,6 +4,7 @@ import App from './App.jsx';
 import { SessionProvider } from './sessionContext.jsx';
 import { DownloadCapabilityProvider } from './downloadCapabilityContext.jsx';
 import { StreamingCapabilityProvider } from './streamingCapabilityContext.jsx';
+import { QbtActiveStreamsProvider } from './qbtActiveStreamsContext.jsx';
 import './styles.css';
 
 createRoot(document.getElementById('root')).render(
@@ -11,7 +12,9 @@ createRoot(document.getElementById('root')).render(
     <SessionProvider>
       <DownloadCapabilityProvider>
         <StreamingCapabilityProvider>
-          <App />
+          <QbtActiveStreamsProvider>
+            <App />
+          </QbtActiveStreamsProvider>
         </StreamingCapabilityProvider>
       </DownloadCapabilityProvider>
     </SessionProvider>
