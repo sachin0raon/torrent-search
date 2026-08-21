@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { X } from 'lucide-react';
+import { X, Play, HardDriveDownload, Trash2 } from 'lucide-react';
 import { streamer } from '../api/streamer.js';
 import { useSessions } from '../sessionContext.jsx';
 import { useQbtActiveStreamsEnabled } from '../qbtActiveStreamsContext.jsx';
@@ -89,16 +89,19 @@ const QbtTorrentCard = memo(function QbtTorrentCard({ torrent, downloadsEnabled,
       </div>
       <div className="stats-card-actions">
         {paused && (
-          <button className="icon-btn" disabled={busy} onClick={() => onAction(hash, 'resume')}>
+          <button disabled={busy} onClick={() => onAction(hash, 'resume')}>
+            <Play size={14} />
             Resume
           </button>
         )}
         {downloadsEnabled && (
-          <button className="icon-btn" disabled={busy} onClick={() => onAction(hash, 'move')}>
+          <button disabled={busy} onClick={() => onAction(hash, 'move')}>
+            <HardDriveDownload size={14} />
             Move to Downloads
           </button>
         )}
-        <button className="icon-btn" disabled={busy} onClick={() => onAction(hash, 'delete')}>
+        <button disabled={busy} onClick={() => onAction(hash, 'delete')}>
+          <Trash2 size={14} />
           Delete
         </button>
       </div>
@@ -199,7 +202,8 @@ function QbtActiveStreamsView() {
       </div>
       {torrents && torrents.length > 0 && (
         <div className="stats-card-actions">
-          <button className="icon-btn" disabled={busyHash !== null} onClick={handleFlush}>
+          <button disabled={busyHash !== null} onClick={handleFlush}>
+            <Trash2 size={14} />
             Flush all
           </button>
         </div>
