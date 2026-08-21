@@ -1,7 +1,6 @@
 package stream
 
 import (
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -134,16 +133,12 @@ func LoadConfig() Config {
 	}
 }
 
-// ValidateEngines rejects invalid combinations of Engine and DownloadEngine.
-// STREAM_ENGINE=qbittorrent and DOWNLOAD_ENGINE=qbittorrent can never both be
-// active in the same process (docs/STREAMING.md §6 Decision #25): nothing in
-// the design needs two qBittorrent-backed engines against the same instance,
-// and allowing it would add a permanently-live edge case for no functional
-// benefit. Pure/no I/O so it can run before any network call.
+// ValidateEngines validates engine configuration. All engine combinations are
+// now supported — STREAM_ENGINE=qbittorrent and DOWNLOAD_ENGINE=qbittorrent
+// may both be active in the same process (the restriction from
+// docs/STREAMING.md §6 Decision #25 was lifted once the combination proved
+// stable). This function is retained as a hook for future validations.
 func (c Config) ValidateEngines() error {
-	if c.Engine == "qbittorrent" && c.DownloadEngine == "qbittorrent" {
-		return fmt.Errorf("STREAM_ENGINE=qbittorrent and DOWNLOAD_ENGINE=qbittorrent cannot both be enabled — use STREAM_ENGINE=anacrolix with DOWNLOAD_ENGINE=qbittorrent instead")
-	}
 	return nil
 }
 

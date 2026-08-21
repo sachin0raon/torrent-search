@@ -758,11 +758,9 @@ qbittorrent-engine container are both live against the same qBittorrent instance
 10. Fully-open, no-auth posture extends to this feature: anyone reaching the
     app can trigger downloads and pull completed files. Same accepted-risk
     stance as §3/§5's "Accepted risk" notes.
-11. `STREAM_ENGINE=qbittorrent` and `DOWNLOAD_ENGINE=qbittorrent` can never
-    both be active in the same process (Decision #25) — the only two valid
-    "qbittorrent involved" configurations are `STREAM_ENGINE=anacrolix` +
-    `DOWNLOAD_ENGINE=qbittorrent`, or `STREAM_ENGINE=qbittorrent` with
-    `DOWNLOAD_ENGINE` unset.
+11. `STREAM_ENGINE=qbittorrent` and `DOWNLOAD_ENGINE=qbittorrent` can both
+    be active in the same process — previously restricted by Decision #25,
+    this restriction was lifted after verifying stability.
 
 ### 6.3 Decision Log
 
@@ -771,7 +769,7 @@ qbittorrent-engine container are both live against the same qBittorrent instance
 | 22 | Download's category (`DOWNLOAD_QBIT_CATEGORY`) is **never purged** on startup — the opposite of §5's Decision #10 | Purge like the streaming engine does | Persistence is the entire point of this feature; purging would silently delete a user's finished downloads on every restart |
 | 23 | Download gets its **own** byte-serving endpoint (`GET /download-api/stream/{hash}/{index}/{filename}`), not a reuse of the existing `/stream/{id}/{index}/{filename}` | Reuse `/stream/` for both Play and Download (the original plan) | Avoids coupling `Manager`'s session-id-keyed lookup to a second id scheme (raw qBittorrent hash); keeps `DownloadManager` self-contained so a future change to Stream's session model can't break Download serving or vice versa |
 | 24 | `QBitPeerSource`'s delete-probe cleanup (§5's Decision #12) is generalized from checking one protected category to checking a **set** — `{STREAM_QBIT_CATEGORY, DOWNLOAD_QBIT_CATEGORY}` (whichever are configured) | Leave the guard checking only `STREAM_QBIT_CATEGORY` | Without this, `QBitPeerSource` (which only runs when `STREAM_ENGINE=anacrolix`) could delete a user's in-progress *download* the same way Decision #12 stopped it from deleting a real *stream* — same bug class, new blast radius, in the common `anacrolix` + `DOWNLOAD_ENGINE=qbittorrent` configuration |
-| 25 | `STREAM_ENGINE=qbittorrent` + `DOWNLOAD_ENGINE=qbittorrent` is an **invalid config pair**, checked in `config.go`'s validation (before any qBittorrent login) and hard-failing (`log.Fatalf`) | Allow both (two separate clients against the same account); allow with just a startup warning | Nothing in the design needs both engines pointed at qBittorrent from the same process; the two real combinations are `anacrolix`+download or `qbittorrent`-stream-only. Allowing the third adds a permanently-live edge case for no functional benefit. Hard fail (not warn) matches the fail-fast posture already used for login/purge failures (§5 Decisions #4/#16) |
+| 25 | **LIFTED:** `STREAM_ENGINE=qbittorrent` + `DOWNLOAD_ENGINE=qbittorrent` was initially an invalid config pair, but is now **fully supported** after proving stable in production | Hard fail (original choice) vs. allow both | Initially restricted to limit risk, now fully supported. |
 | 26 | **Found after shipping:** `DownloadManager` runs a background sweep (`PurgeUnselected`, `StartGC`) that auto-removes any category-tagged torrent added more than `DOWNLOAD_UNSELECTED_TIMEOUT` ago with **no file ever selected** | Rely on the user to manually delete abandoned entries; no cleanup at all | Every "Download" tap on a result row adds the magnet to qBittorrent immediately (to fetch metadata and show the file list) — before the user has chosen anything. Closing the panel without selecting a file (or a dead magnet whose metadata never arrives) previously left that torrent in qBittorrent forever, since Decision #22 deliberately disabled the startup purge. A torrent with **any** selected file is a real, intentional download and is never touched by this, regardless of age — this only cleans up the "looked, didn't pick anything" case |
 
 ### 6.4 Configuration additions
@@ -1018,7 +1016,7 @@ whole polled-detail call.
 | Case | Behavior |
 |---|---|
 | `DOWNLOAD_ENGINE` unset | Every `/download-api/*` route, including `/status`, 404s from the mux (route never mounted) — the frontend's `downloadCapabilityContext.jsx` treats a failed `getStatus()` the same as `enabled:false` |
-| `STREAM_ENGINE=qbittorrent` + `DOWNLOAD_ENGINE=qbittorrent` | Startup `log.Fatalf` (Decision #25), before any qBittorrent login |
+| `STREAM_ENGINE=qbittorrent` + `DOWNLOAD_ENGINE=qbittorrent` | Supported — both streaming and download managers operate simultaneously |
 | Metadata timeout | `504`, same shape as §4.8's Stream case |
 | Invalid/duplicate magnet | Reuse existing torrent by hash; malformed → `400` |
 | Delete of already-gone hash | Idempotent → `200` (confirmed against the vendored client, §5.8) |

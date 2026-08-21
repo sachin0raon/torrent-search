@@ -66,7 +66,7 @@ func TestValidateEngines(t *testing.T) {
 		{"both unset", "", "", false},
 		{"anacrolix + download qbittorrent (the typical case)", "anacrolix", "qbittorrent", false},
 		{"stream qbittorrent, download unset", "qbittorrent", "", false},
-		{"both qbittorrent is rejected", "qbittorrent", "qbittorrent", true},
+		{"both qbittorrent is allowed", "qbittorrent", "qbittorrent", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

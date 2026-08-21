@@ -31,10 +31,10 @@ export const streamer = {
   // Add a magnet and wait for its metadata; returns
   // { sessionId, name, ready, files: [{ index, path, size, streamable }] }.
   createSession: (magnet, signal) =>
-    request('/stream-api/sessions', { method: 'POST', body: { magnet }, signal }),
+    request('/stream-api/sessions', { method: 'POST', body: { magnet }, signal, withClientId: true }),
 
   // Poll an existing session (e.g. while metadata is still arriving).
-  getSession: (id, signal) => request(`/stream-api/sessions/${id}`, { signal }),
+  getSession: (id, signal) => request(`/stream-api/sessions/${id}`, { signal, withClientId: true }),
 
   // Fetch live stats for a session: seeders + per-file download progress.
   // Throws with err.status === 410 if the session has been GC'd.
