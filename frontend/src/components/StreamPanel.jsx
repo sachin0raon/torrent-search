@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronUp, RefreshCw, PlayCircle } from 'lucide-react';
 import { streamer } from '../api/streamer.js';
 import { useSessions } from '../sessionContext.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
@@ -17,7 +17,7 @@ function StreamableLinks({ session, file, name }) {
     <div className="player-links">
       {links.map((l) => (
         <a key={l.id} href={l.href} rel="noreferrer">
-          <button className="player-btn">{l.label}</button>
+          <button className="player-btn"><PlayCircle size={14} />{l.label}</button>
         </a>
       ))}
       <CopyButton value={url} label="Copy stream URL" className="" />
