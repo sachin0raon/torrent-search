@@ -888,6 +888,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 }
 .stats-chip-expired { color: var(--muted); }
 .stats-chip-error { color: #e5a44a; background: rgba(229, 164, 74, 0.12); }
+.stats-chip-success { color: #4ae581; background: rgba(74, 229, 129, 0.12); }
 
 /* ---- File rows ---- */
 .stats-file-list { display: flex; flex-direction: column; gap: 10px; }
@@ -929,6 +930,10 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
    ".modal .actions"'s flex-end/margin-top rules, since these cards live
    inside .modal. */
 .stats-card-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.stats-card-actions button { padding: 5px 10px; font-size: 12px; }
+@media (pointer: coarse) {
+  .stats-card-actions button { min-height: 32px; }
+}
 
 /* ---- Touch targets: enforce >=44px hit areas on touch devices (pointer:coarse
    catches phones/tablets without penalizing desktop mouse users). ---- */

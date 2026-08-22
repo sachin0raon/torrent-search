@@ -109,7 +109,9 @@ async def search_1337x(
     query: str, client: httpx.AsyncClient | None = None
 ) -> list[X1337SearchItem]:
     """Search 1337x via D1 static API."""
-    clean_query = query.strip()
+    # Replace special characters like hyphen, quote, comma, etc. with a space
+    clean_query = re.sub(r"[^\w\s]", " ", query)
+    clean_query = re.sub(r"\s+", " ", clean_query).strip()
     if not clean_query:
         return []
 

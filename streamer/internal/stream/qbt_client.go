@@ -194,7 +194,7 @@ func isPausedState(s qbt.TorrentState) bool {
 func (c *qbtClient) ListTorrents(ctx context.Context, clientID string) ([]TorrentSummary, error) {
 	listCtx, cancel := context.WithTimeout(ctx, apiTimeout)
 	defer cancel()
-	torrents, err := c.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Category: c.category, Tag: clientID})
+	torrents, err := c.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Filter: qbt.TorrentFilterAll, Category: c.category, Tag: clientID})
 	if err != nil {
 		return nil, fmt.Errorf("qbt: list torrents: %w", err)
 	}
@@ -263,7 +263,7 @@ func (c *qbtClient) MoveToCategory(ctx context.Context, hash, clientID, targetCa
 // matching in-memory sessions.
 func (c *qbtClient) FlushCategory(ctx context.Context, clientID string) ([]string, error) {
 	listCtx, cancel := context.WithTimeout(ctx, apiTimeout)
-	torrents, err := c.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Category: c.category, Tag: clientID})
+	torrents, err := c.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Filter: qbt.TorrentFilterAll, Category: c.category, Tag: clientID})
 	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("qbt: flush list: %w", err)

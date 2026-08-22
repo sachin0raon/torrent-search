@@ -34,6 +34,9 @@ function SessionCard({ entry }) {
       <div className="stats-session-header">
         <span className="stats-session-name">{name}</span>
         <div className="stats-session-chips">
+          {!expired && files && files.length > 0 && files.every(f => f.size > 0 && f.downloaded >= f.size) && (
+            <span className="stats-chip stats-chip-success">Completed</span>
+          )}
           {!expired && (
             <span className="stats-chip">{seeders} seed{seeders !== 1 ? 's' : ''}</span>
           )}
@@ -74,7 +77,9 @@ const QbtTorrentCard = memo(function QbtTorrentCard({ torrent, downloadsEnabled,
       <div className="stats-session-header">
         <span className="stats-session-name">{name}</span>
         <div className="stats-session-chips">
-          {paused && <span className="stats-chip">Paused</span>}
+          {progress === 1 && <span className="stats-chip stats-chip-success">Completed</span>}
+          {paused && progress !== 1 && <span className="stats-chip">Paused</span>}
+          {paused && progress === 1 && <span className="stats-chip">Paused</span>}
         </div>
       </div>
       <div className="stats-file-list">
@@ -88,16 +93,16 @@ const QbtTorrentCard = memo(function QbtTorrentCard({ torrent, downloadsEnabled,
         </div>
       </div>
       <div className="stats-card-actions">
-        {paused && (
-          <button disabled={busy} onClick={() => onAction(hash, 'resume')}>
-            <Play size={14} />
-            Resume
-          </button>
-        )}
         {downloadsEnabled && (
           <button disabled={busy} onClick={() => onAction(hash, 'move')}>
             <HardDriveDownload size={14} />
             Move to Downloads
+          </button>
+        )}
+        {paused && (
+          <button disabled={busy} onClick={() => onAction(hash, 'resume')}>
+            <Play size={14} />
+            Resume
           </button>
         )}
         <button disabled={busy} onClick={() => onAction(hash, 'delete')}>

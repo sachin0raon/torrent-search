@@ -495,7 +495,7 @@ func (m *DownloadManager) DiskSpace() (DiskSpaceInfo, error) {
 func (m *DownloadManager) List(ctx context.Context, clientID string) ([]DownloadInfo, error) {
 	listCtx, cancel := context.WithTimeout(ctx, apiTimeout)
 	defer cancel()
-	torrents, err := m.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Category: m.category, Tag: clientID})
+	torrents, err := m.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Filter: qbt.TorrentFilterAll, Category: m.category, Tag: clientID})
 	if err != nil {
 		return nil, fmt.Errorf("download: list: %w", err)
 	}
