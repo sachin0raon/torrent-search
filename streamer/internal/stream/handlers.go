@@ -153,16 +153,22 @@ func (h *Handler) streamFile(w http.ResponseWriter, r *http.Request) {
 	log.Printf("streamer: streaming id=%s file=%q size=%d", r.PathValue("id"), path.Base(info.Path), info.Size)
 
 	name := path.Base(info.Path)
-	// Set the content type explicitly so http.ServeContent does not sniff by
-	// reading the first bytes (which could block on not-yet-downloaded pieces).
+	// Set Content-Type explicitly so the range-server doesn't have to sniff
+	// by reading the first bytes (which would block on not-yet-downloaded pieces).
 	w.Header().Set("Content-Type", contentType(name))
 	// Provide the filename to players that determine format from Content-Disposition
 	// rather than the URL path (e.g. when the player stripped the filename from
 	// the URL before requesting).
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": name}))
-	// ServeContent handles Range/If-Range parsing, 206 responses and
-	// Accept-Ranges using the reader's Seek to discover the size.
-	http.ServeContent(w, r, name, time.Time{}, reader)
+	// Use serveRange instead of http.ServeContent: http.ServeContent internally
+	// calls Seek(0, io.SeekEnd) to discover the file size before sending any
+	// bytes. For the qBittorrent engine's piece-aware reader that Seek updates
+	// r.pos to the end of the file, so the very first Read blocks until the
+	// *last* piece of the torrent is downloaded — often many seconds or minutes
+	// into a fresh stream. serveRange accepts the size we already know from
+	// FileInfo and never issues that seek, so the player receives its first
+	// bytes as soon as piece 0 (the start of the file) is ready.
+	serveRange(w, r, reader, info.Size)
 }
 
 // listTorrents, resumeTorrent, deleteTorrent, moveTorrentToDownloads, and

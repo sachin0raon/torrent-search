@@ -129,7 +129,14 @@ func (c *qbtClient) AddMagnet(uri string) (Torrent, error) {
 	opts := map[string]string{
 		"category":           c.category,
 		"sequentialDownload": "true",
-		"firstLastPiecePrio": "true",
+		// firstLastPiecePrio is intentionally omitted for the streaming engine:
+		// it tells qBittorrent to download the last piece immediately alongside
+		// the first, which forces the player to wait for that last piece before
+		// playback can begin (the old http.ServeContent path needed it for its
+		// Seek(0,SeekEnd); serveRange doesn't). For streaming, sequential from
+		// piece 0 is optimal. The download manager (download_manager.go) keeps
+		// firstLastPiecePrio since completed downloads benefit from fast seeks
+		// to the end.
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()

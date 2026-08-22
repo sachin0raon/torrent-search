@@ -25,6 +25,16 @@ export const PLAYERS = [
       `intent:${url}#Intent;package=com.mxtech.videoplayer.ad;S.title=${enc(fileName)};end`,
   },
 
+  // MX Player (Pro): Android intent URI; the file name becomes the title. The
+  // title value is URL-encoded so filenames with ';', '#' or spaces don't break
+  // the intent URI (Android decodes the extra).
+  {
+    id: 'mxp',
+    label: 'MX Player Pro',
+    build: (url, fileName) =>
+      `intent:${url}#Intent;package=com.mxtech.videoplayer.pro;S.title=${enc(fileName)};end`,
+  },
+
   // nPlayer: nplayer-<url> over the full URL.
   { id: 'nplayer', label: 'nPlayer', build: (url) => `nplayer-${url}` },
 ];

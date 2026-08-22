@@ -208,14 +208,18 @@ func (h *Handler) streamDownloadFile(w http.ResponseWriter, r *http.Request) {
 	defer reader.Close()
 
 	name := path.Base(info.Name)
-	// Same rationale as streamFile: set Content-Type explicitly so
-	// http.ServeContent doesn't sniff by reading ahead (which could block on
-	// a not-yet-downloaded piece).
+	// Same rationale as streamFile: set Content-Type explicitly so the
+	// range-server doesn't have to sniff by reading ahead (which could block
+	// on a not-yet-downloaded piece).
 	w.Header().Set("Content-Type", contentType(name))
 	disposition := "inline"
 	if r.URL.Query().Get("dl") != "" {
 		disposition = "attachment"
 	}
 	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": name}))
-	http.ServeContent(w, r, name, time.Time{}, reader)
+	// Use serveRange instead of http.ServeContent for the same reason as
+	// streamFile: http.ServeContent's internal Seek(0, io.SeekEnd) would
+	// block until the last piece of the torrent is downloaded before the
+	// player receives its first byte.
+	serveRange(w, r, reader, info.Size)
 }
