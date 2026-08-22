@@ -103,7 +103,7 @@ func newQBitClientWithAPI(api qbtAPI, remoteRoot, downloadDir, category string, 
 func purgeCategory(api qbtAPI, category string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
-	torrents, err := api.GetTorrentsCtx(ctx, qbt.TorrentFilterOptions{Category: category})
+	torrents, err := api.GetTorrentsCtx(ctx, qbt.TorrentFilterOptions{Filter: qbt.TorrentFilterAll, Category: category})
 	if err != nil {
 		return err
 	}
@@ -165,7 +165,7 @@ func (c *qbtClient) Close() {}
 func (c *qbtClient) verifyOwnership(ctx context.Context, hash, clientID string) error {
 	checkCtx, cancel := context.WithTimeout(ctx, apiTimeout)
 	defer cancel()
-	torrents, err := c.api.GetTorrentsCtx(checkCtx, qbt.TorrentFilterOptions{Hashes: []string{hash}, Tag: clientID})
+	torrents, err := c.api.GetTorrentsCtx(checkCtx, qbt.TorrentFilterOptions{Filter: qbt.TorrentFilterAll, Hashes: []string{hash}, Tag: clientID})
 	if err != nil {
 		return fmt.Errorf("qbt: verify ownership: %w", err)
 	}

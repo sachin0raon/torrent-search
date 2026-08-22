@@ -195,7 +195,7 @@ func (m *DownloadManager) Close() {
 // logging and tests).
 func (m *DownloadManager) PurgeUnselected(ctx context.Context) ([]string, error) {
 	listCtx, cancel := context.WithTimeout(ctx, apiTimeout)
-	torrents, err := m.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Category: m.category})
+	torrents, err := m.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Filter: qbt.TorrentFilterAll, Category: m.category})
 	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("download: purge-unselected list: %w", err)
@@ -285,7 +285,7 @@ func (m *DownloadManager) AddTorrent(ctx context.Context, magnet, clientID strin
 	// detected"). Detect that up front and skip the add, so picking a second
 	// file from an already-downloading pack doesn't fail.
 	checkCtx, cancel := context.WithTimeout(ctx, apiTimeout)
-	existing, err := m.api.GetTorrentsCtx(checkCtx, qbt.TorrentFilterOptions{Hashes: []string{hash}})
+	existing, err := m.api.GetTorrentsCtx(checkCtx, qbt.TorrentFilterOptions{Filter: qbt.TorrentFilterAll, Hashes: []string{hash}})
 	cancel()
 	alreadyTracked := err == nil && len(existing) > 0
 
@@ -445,7 +445,7 @@ func (m *DownloadManager) SelectFiles(ctx context.Context, hash string, indices 
 // same graceful no-scoping fallback as List/Get.
 func (m *DownloadManager) verifyOwnership(ctx context.Context, hash, clientID string) error {
 	checkCtx, cancel := context.WithTimeout(ctx, apiTimeout)
-	torrents, err := m.api.GetTorrentsCtx(checkCtx, qbt.TorrentFilterOptions{Hashes: []string{hash}, Tag: clientID})
+	torrents, err := m.api.GetTorrentsCtx(checkCtx, qbt.TorrentFilterOptions{Filter: qbt.TorrentFilterAll, Hashes: []string{hash}, Tag: clientID})
 	cancel()
 	if err != nil {
 		return fmt.Errorf("download: verify ownership: %w", err)
@@ -567,7 +567,7 @@ func (m *DownloadManager) Get(ctx context.Context, hash, clientID string) (Downl
 		return DownloadInfo{}, ErrDownloadNotFound
 	}
 	listCtx, cancel := context.WithTimeout(ctx, apiTimeout)
-	torrents, err := m.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Hashes: []string{hash}, Tag: clientID})
+	torrents, err := m.api.GetTorrentsCtx(listCtx, qbt.TorrentFilterOptions{Filter: qbt.TorrentFilterAll, Hashes: []string{hash}, Tag: clientID})
 	cancel()
 	if err != nil {
 		return DownloadInfo{}, fmt.Errorf("download: get: %w", err)
