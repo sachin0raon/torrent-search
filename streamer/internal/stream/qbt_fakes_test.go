@@ -87,6 +87,18 @@ func (f *fakeQbtAPI) AddTorrentFromUrlCtx(ctx context.Context, url string, optio
 	return &qbt.TorrentAddResponse{}, nil
 }
 
+func (f *fakeQbtAPI) AddTorrentFromMemoryCtx(ctx context.Context, buf []byte, options map[string]string) (*qbt.TorrentAddResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.addErr != nil {
+		return nil, f.addErr
+	}
+	// Record as a URL-style add with a sentinel so tests can distinguish the two paths.
+	f.added = append(f.added, "__memory__")
+	f.addedOpts = append(f.addedOpts, options)
+	return &qbt.TorrentAddResponse{}, nil
+}
+
 func (f *fakeQbtAPI) GetTorrentsCtx(ctx context.Context, o qbt.TorrentFilterOptions) ([]qbt.Torrent, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -1,10 +1,13 @@
 package stream
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -13,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	metainfo "github.com/anacrolix/torrent/metainfo"
 	qbt "github.com/autobrr/go-qbittorrent"
 )
 
@@ -22,6 +26,8 @@ var (
 	ErrDownloadInvalidMagnet   = errors.New("download: invalid magnet")
 	ErrDownloadMetadataTimeout = errors.New("download: timed out fetching torrent metadata")
 	ErrDownloadNotFound        = errors.New("download: torrent not found")
+	ErrDownloadInvalidURL      = errors.New("download: invalid or unsupported URL")
+	ErrDownloadFetchTorrent    = errors.New("download: failed to fetch .torrent file")
 )
 
 // DiskSpaceInfo describes total, free, and used space for the download directory.
@@ -254,84 +260,165 @@ func hasSelectedFile(files *qbt.TorrentFiles) bool {
 	return false
 }
 
-// AddTorrent adds a magnet tagged with the download category and blocks
-// (bounded by ctx) until its metadata is available, then zeroes every file's
-// download priority — nothing downloads until an explicit SelectFiles call,
-// mirroring qbtTorrent.pollMetadata's "only the picked file downloads"
-// baseline for the streaming engine (Decision #6). Unlike Manager.AddSession,
-// this runs synchronously in the calling goroutine rather than via a
-// background poller + channel: it's called directly from a single blocking
-// HTTP handler, so there's no async session model to feed.
+// AddTorrent adds a torrent from a magnet URI or an http(s) URL pointing to a
+// .torrent file. It blocks (bounded by ctx) until the torrent's metadata is
+// available in qBittorrent. When autoStart is false it zeroes every file's
+// download priority so that nothing downloads until an explicit SelectFiles
+// call (the original file-picker flow). When autoStart is true it leaves
+// qBittorrent's default priority (1 = normal) on all files so downloading
+// begins immediately without a separate SelectFiles step.
 //
-// clientID additionally tags the torrent (qBittorrent's own per-torrent tag,
-// separate from category) with the requesting browser's ID, so List/Get and
-// the mutating calls below can scope themselves to "this browser's
-// downloads" rather than the whole shared category — see the Downloads
-// modal's session-scoping design. An empty clientID (header not sent) tags
-// nothing, which List/Get/etc. treat as "no scoping," same as before this
-// was added. Tagging failures are logged, not fatal — a torrent that isn't
-// tagged yet still downloads fine; it just won't show up in a scoped list
-// until a retry (e.g. the next SelectFiles poll) succeeds.
-func (m *DownloadManager) AddTorrent(ctx context.Context, magnet, clientID string) (DownloadInfo, error) {
-	clean := sanitizeMagnet(magnet)
-	hash, err := parseMagnetInfohash(clean)
-	if err != nil {
-		return DownloadInfo{}, ErrDownloadInvalidMagnet
+// For http(s) links the streamer fetches the .torrent payload itself —
+// bounded by ctx — and uploads the bytes via AddTorrentFromMemoryCtx, then
+// derives the infohash from the parsed metainfo so the subsequent polling
+// loop can look the torrent up by hash. A magnet URI is handled with the
+// original AddTorrentFromUrlCtx path.
+//
+// clientID additionally tags the torrent with the requesting browser's ID;
+// see the original AddTorrent doc comment above for the full scoping rationale.
+func (m *DownloadManager) AddTorrent(ctx context.Context, link, clientID string, autoStart bool) (DownloadInfo, error) {
+	link = strings.TrimSpace(link)
+
+	var hash string
+	var addErr error
+
+	opts := map[string]string{
+		"category":           m.category,
+		"sequentialDownload": "true",
+		"firstLastPiecePrio": "true",
+	}
+	if clientID != "" {
+		opts["tags"] = clientID
 	}
 
-	// A season pack's magnet may already be tracked from an earlier AddTorrent
-	// call for a different file in the same pack — qBittorrent rejects
-	// re-adding a hash it already knows with an HTTP 409 ("conflicts
-	// detected"). Detect that up front and skip the add, so picking a second
-	// file from an already-downloading pack doesn't fail.
-	checkCtx, cancel := context.WithTimeout(ctx, apiTimeout)
-	existing, err := m.api.GetTorrentsCtx(checkCtx, qbt.TorrentFilterOptions{Filter: qbt.TorrentFilterAll, Hashes: []string{hash}})
-	cancel()
-	alreadyTracked := err == nil && len(existing) > 0
+	switch {
+	case strings.HasPrefix(link, "magnet:"):
+		clean := sanitizeMagnet(link)
+		hash, addErr = parseMagnetInfohash(clean)
+		if addErr != nil {
+			return DownloadInfo{}, ErrDownloadInvalidMagnet
+		}
 
-	if !alreadyTracked {
-		opts := map[string]string{
-			"category":           m.category,
-			"sequentialDownload": "true",
-			"firstLastPiecePrio": "true",
+		// A season pack's magnet may already be tracked — qBittorrent rejects
+		// re-adding a hash it already knows with HTTP 409 ("conflicts detected").
+		checkCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+		existing, err := m.api.GetTorrentsCtx(checkCtx, qbt.TorrentFilterOptions{Filter: qbt.TorrentFilterAll, Hashes: []string{hash}})
+		cancel()
+		alreadyTracked := err == nil && len(existing) > 0
+
+		if !alreadyTracked {
+			addCtx, addCancel := context.WithTimeout(ctx, apiTimeout)
+			_, addErr = m.api.AddTorrentFromUrlCtx(addCtx, clean, opts)
+			addCancel()
+			if addErr != nil {
+				return DownloadInfo{}, fmt.Errorf("download: add torrent: %w", addErr)
+			}
+		} else if clientID != "" {
+			// Additive — a second browser picking from an already-downloading
+			// pack just gains visibility, it doesn't restart it.
+			tagCtx, tagCancel := context.WithTimeout(ctx, apiTimeout)
+			if err := m.api.AddTagsCtx(tagCtx, []string{hash}, clientID); err != nil {
+				log.Printf("streamer: download add tag hash=%.8s: %v (torrent still usable, just unscoped)", hash, err)
+			}
+			tagCancel()
 		}
-		if clientID != "" {
-			opts["tags"] = clientID
+
+		// Already-tracked torrents skip the zero-all-priorities step.
+		poll := m.choosePoll(autoStart, alreadyTracked)
+		if info, ready := poll(ctx, hash); ready {
+			return info, nil
 		}
-		addCtx, addCancel := context.WithTimeout(ctx, apiTimeout)
-		_, err = m.api.AddTorrentFromUrlCtx(addCtx, clean, opts)
-		addCancel()
+		return m.pollLoop(ctx, hash, poll)
+
+	case strings.HasPrefix(link, "http://"), strings.HasPrefix(link, "https://"):
+		buf, h, err := m.fetchTorrentFile(ctx, link)
 		if err != nil {
-			return DownloadInfo{}, fmt.Errorf("download: add torrent: %w", err)
+			return DownloadInfo{}, err
 		}
-	} else if clientID != "" {
-		// Additive (go-qbittorrent's AddTagsCtx never replaces existing tags),
-		// so a second browser picking a file from a pack this session already
-		// started just gains visibility too, rather than losing it.
-		tagCtx, tagCancel := context.WithTimeout(ctx, apiTimeout)
-		if err := m.api.AddTagsCtx(tagCtx, []string{hash}, clientID); err != nil {
-			log.Printf("streamer: download add tag hash=%.8s: %v (torrent still usable, just unscoped)", hash, err)
-		}
-		tagCancel()
-	}
+		hash = h
 
-	// Already-tracked torrents use pollExistingOnce, which skips the
-	// zero-all-priorities step: the pack may have files already selected and
-	// downloading from an earlier SelectFiles call, and re-zeroing them here
-	// would silently stop that download.
-	poll := m.pollMetadataOnce
+		// Check for existing before adding (same 409-avoidance as magnet path).
+		checkCtx, cancel := context.WithTimeout(ctx, apiTimeout)
+		existing, err := m.api.GetTorrentsCtx(checkCtx, qbt.TorrentFilterOptions{Filter: qbt.TorrentFilterAll, Hashes: []string{hash}})
+		cancel()
+		alreadyTracked := err == nil && len(existing) > 0
+
+		if !alreadyTracked {
+			addCtx, addCancel := context.WithTimeout(ctx, apiTimeout)
+			_, addErr = m.api.AddTorrentFromMemoryCtx(addCtx, buf, opts)
+			addCancel()
+			if addErr != nil {
+				return DownloadInfo{}, fmt.Errorf("download: add torrent from file: %w", addErr)
+			}
+		} else if clientID != "" {
+			tagCtx, tagCancel := context.WithTimeout(ctx, apiTimeout)
+			if err := m.api.AddTagsCtx(tagCtx, []string{hash}, clientID); err != nil {
+				log.Printf("streamer: download add tag hash=%.8s: %v (torrent still usable, just unscoped)", hash, err)
+			}
+			tagCancel()
+		}
+
+		poll := m.choosePoll(autoStart, alreadyTracked)
+		if info, ready := poll(ctx, hash); ready {
+			return info, nil
+		}
+		return m.pollLoop(ctx, hash, poll)
+
+	default:
+		return DownloadInfo{}, ErrDownloadInvalidURL
+	}
+}
+
+// fetchTorrentFile downloads the .torrent payload at url (bounded by ctx) and
+// returns the raw bytes together with the lowercase-hex SHA1 infohash derived
+// from the parsed metainfo. A 4 MiB body limit guards against runaway responses.
+func (m *DownloadManager) fetchTorrentFile(ctx context.Context, url string) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: build request: %v", ErrDownloadFetchTorrent, err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: %v", ErrDownloadFetchTorrent, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", fmt.Errorf("%w: server returned %s", ErrDownloadFetchTorrent, resp.Status)
+	}
+	const maxSize = 4 << 20 // 4 MiB
+	buf, err := io.ReadAll(io.LimitReader(resp.Body, maxSize))
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: read body: %v", ErrDownloadFetchTorrent, err)
+	}
+	mi, err := metainfo.Load(bytes.NewReader(buf))
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: parse metainfo: %v", ErrDownloadFetchTorrent, err)
+	}
+	hash := mi.HashInfoBytes().HexString()
+	if hash == "" {
+		return nil, "", fmt.Errorf("%w: empty infohash", ErrDownloadFetchTorrent)
+	}
+	return buf, hash, nil
+}
+
+// choosePoll returns the appropriate polling function given whether we want
+// auto-start and whether the torrent was already tracked.
+func (m *DownloadManager) choosePoll(autoStart, alreadyTracked bool) func(context.Context, string) (DownloadInfo, bool) {
 	if alreadyTracked {
-		poll = m.pollExistingOnce
+		// Never re-zero already-downloading files.
+		return m.pollExistingOnce
 	}
-
-	// Check once immediately before entering the ticker loop below — a ticker's
-	// first tick only fires after a full pollInterval, which would otherwise
-	// delay even already-available metadata (e.g. re-adding a hash qBittorrent
-	// already knows) by a needless wait.
-	if info, ready := poll(ctx, hash); ready {
-		return info, nil
+	if autoStart {
+		// Skip zeroing — qBittorrent's default priority=1 starts all files.
+		return m.pollMetadataAutoStart
 	}
+	return m.pollMetadataOnce
+}
 
+// pollLoop is the shared ticker loop for AddTorrent after the initial
+// synchronous poll fails — extracted so both the magnet and URL branches
+// share identical loop logic without duplication.
+func (m *DownloadManager) pollLoop(ctx context.Context, hash string, poll func(context.Context, string) (DownloadInfo, bool)) (DownloadInfo, error) {
 	ticker := time.NewTicker(m.pollInterval)
 	defer ticker.Stop()
 	for {
@@ -339,8 +426,7 @@ func (m *DownloadManager) AddTorrent(ctx context.Context, magnet, clientID strin
 		case <-ctx.Done():
 			return DownloadInfo{}, ErrDownloadMetadataTimeout
 		case <-ticker.C:
-			info, ready := poll(ctx, hash)
-			if ready {
+			if info, ready := poll(ctx, hash); ready {
 				return info, nil
 			}
 		}
@@ -385,6 +471,21 @@ func (m *DownloadManager) pollMetadataOnce(ctx context.Context, hash string) (Do
 	_ = m.api.SetFilePriorityCtx(zeroCtx, hash, strings.Join(ids, "|"), 0)
 	cancel()
 
+	return DownloadInfo{
+		Hash:  hash,
+		Name:  props.Name,
+		Files: buildDownloadFiles(files),
+	}, true
+}
+
+// pollMetadataAutoStart is like pollMetadataOnce but skips the zero-priority
+// step — qBittorrent's default (priority 1 = normal) is left intact so all
+// files begin downloading immediately without a SelectFiles call.
+func (m *DownloadManager) pollMetadataAutoStart(ctx context.Context, hash string) (DownloadInfo, bool) {
+	props, files, ready := m.fetchReadyMetadata(ctx, hash)
+	if !ready {
+		return DownloadInfo{}, false
+	}
 	return DownloadInfo{
 		Hash:  hash,
 		Name:  props.Name,

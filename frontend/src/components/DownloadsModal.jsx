@@ -1,11 +1,12 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, ChevronDown, ChevronUp, Trash2, PlayCircle, Download, Pause, Play, HardDrive } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Trash2, PlayCircle, Download, Pause, Play, HardDrive, Plus, Link, Loader } from 'lucide-react';
 import { downloader } from '../api/downloader.js';
 import { buildDownloadUrl, playerLinks, baseName, isMediaFile } from '../playerLinks.js';
 import { fadeUp, spring, collapsePanel } from '../motion.js';
 import { formatSize } from '../formatSize.js';
 import CopyButton from './CopyButton.jsx';
+import ErrorBanner from './ErrorBanner.jsx';
 
 const POLL_INTERVAL = 5000;
 
@@ -27,6 +28,90 @@ function DiskSpaceCard({ diskSpace }) {
       <div className="stats-progress-bar">
         <div className="stats-progress-fill" style={{ width: `${usedPct}%` }} />
       </div>
+    </div>
+  );
+}
+
+// AddTorrentBar — collapsible form to add a magnet link or .torrent URL.
+// autoStart=true so all files begin downloading immediately without a
+// separate file-picker step (confirmed in brainstorming session).
+function AddTorrentBar({ onAdded }) {
+  const [open, setOpen] = useState(false);
+  const [link, setLink] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState('');
+  const inputRef = useRef(null);
+
+  // Focus the input whenever the bar opens.
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const trimmed = link.trim();
+    if (!trimmed) return;
+    setAdding(true);
+    setError('');
+    try {
+      await downloader.createDownload(trimmed, true);
+      setLink('');
+      setOpen(false);
+      onAdded();
+    } catch (err) {
+      setError(err.message || 'Failed to add torrent');
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  return (
+    <div className="add-torrent-bar">
+      <motion.button
+        className="add-torrent-toggle"
+        onClick={() => { setOpen((o) => !o); setError(''); }}
+        whileTap={{ scale: 0.97 }}
+        aria-expanded={open}
+      >
+        <Plus size={14} />
+        Add Torrent
+      </motion.button>
+      <AnimatePresence initial={false}>
+        {open ? (
+          <motion.div key="bar" {...collapsePanel} style={{ overflow: 'hidden' }}>
+            <form className="add-torrent-form" onSubmit={handleSubmit}>
+              <div className="add-torrent-input-row">
+                <Link size={14} className="add-torrent-icon" />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  className="add-torrent-input"
+                  placeholder="Paste magnet link or .torrent URL…"
+                  value={link}
+                  onChange={(e) => setLink(e.target.value)}
+                  disabled={adding}
+                  aria-label="Magnet link or .torrent URL"
+                />
+                <motion.button
+                  type="submit"
+                  className="add-torrent-submit"
+                  disabled={adding || !link.trim()}
+                  whileTap={{ scale: 0.96 }}
+                  aria-label="Start download"
+                >
+                  {adding ? (
+                    <Loader size={13} style={{ animation: 'spin 0.7s linear infinite' }} />
+                  ) : (
+                    <Download size={13} />
+                  )}
+                  {adding ? 'Adding…' : 'Download'}
+                </motion.button>
+              </div>
+              {error ? <ErrorBanner message={error} onDismiss={() => setError('')} /> : null}
+            </form>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }
@@ -326,6 +411,7 @@ export default function DownloadsModal({ onClose }) {
 
         <div className="stats-modal-body">
           <DiskSpaceCard diskSpace={diskSpace} />
+          <AddTorrentBar onAdded={poll} />
           {downloads === null && !error ? <div className="spinner">Loading downloads…</div> : null}
           {error ? <div className="empty">Couldn't reach the download manager.</div> : null}
           {downloads && downloads.length === 0 ? (

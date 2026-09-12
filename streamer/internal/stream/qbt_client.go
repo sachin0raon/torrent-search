@@ -29,6 +29,7 @@ const apiTimeout = 15 * time.Second
 type qbtAPI interface {
 	LoginCtx(ctx context.Context) error
 	AddTorrentFromUrlCtx(ctx context.Context, url string, options map[string]string) (*qbt.TorrentAddResponse, error)
+	AddTorrentFromMemoryCtx(ctx context.Context, buf []byte, options map[string]string) (*qbt.TorrentAddResponse, error)
 	GetTorrentsCtx(ctx context.Context, o qbt.TorrentFilterOptions) ([]qbt.Torrent, error)
 	GetTorrentPropertiesCtx(ctx context.Context, hash string) (qbt.TorrentProperties, error)
 	GetFilesInformationCtx(ctx context.Context, hash string) (*qbt.TorrentFiles, error)

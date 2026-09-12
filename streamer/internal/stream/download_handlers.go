@@ -60,21 +60,44 @@ func clientID(r *http.Request) string {
 	return r.Header.Get("X-Client-Id")
 }
 
+// downloadRequest is the JSON body accepted by POST /download-api/torrents.
+// link accepts either a magnet URI (magnet:?xt=...) or an http(s) URL pointing
+// to a .torrent file. autoStart, when true, causes all files to begin
+// downloading immediately; when false (or absent) files are added paused and
+// require an explicit SelectFiles call to start (the file-picker flow).
+// The legacy "magnet" key is still accepted as an alias for link.
+type downloadRequest struct {
+	Link      string `json:"link"`
+	Magnet    string `json:"magnet"` // legacy alias, kept for backward compatibility
+	AutoStart bool   `json:"autoStart"`
+}
+
 func (h *Handler) createDownload(w http.ResponseWriter, r *http.Request) {
-	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Magnet) == "" {
-		writeError(w, http.StatusBadRequest, "missing or invalid magnet")
+	var req downloadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	// Prefer the new "link" field; fall back to the legacy "magnet" field.
+	link := strings.TrimSpace(req.Link)
+	if link == "" {
+		link = strings.TrimSpace(req.Magnet)
+	}
+	if link == "" {
+		writeError(w, http.StatusBadRequest, "missing link or magnet")
 		return
 	}
 
 	ctx, cancel := contextWithTimeout(r, h.cfg.MetadataTimeout)
 	defer cancel()
 
-	info, err := h.dm.AddTorrent(ctx, strings.TrimSpace(req.Magnet), clientID(r))
+	info, err := h.dm.AddTorrent(ctx, link, clientID(r), req.AutoStart)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrDownloadInvalidMagnet):
-			writeError(w, http.StatusBadRequest, "invalid magnet")
+		case errors.Is(err, ErrDownloadInvalidMagnet), errors.Is(err, ErrDownloadInvalidURL):
+			writeError(w, http.StatusBadRequest, "invalid magnet or URL")
+		case errors.Is(err, ErrDownloadFetchTorrent):
+			writeError(w, http.StatusBadGateway, err.Error())
 		case errors.Is(err, ErrDownloadMetadataTimeout):
 			writeError(w, http.StatusGatewayTimeout, "couldn't fetch torrent info (no peers?)")
 		default:

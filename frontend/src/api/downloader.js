@@ -34,11 +34,12 @@ export const downloader = {
   // {totalBytes, freeBytes, usedBytes}
   getDiskSpace: (signal) => request('/download-api/disk', { signal }),
 
-  // Add a magnet and wait for its metadata; returns
-  // { hash, name, files: [{ index, name, size }] }. Nothing downloads yet —
-  // call selectFiles to actually start.
-  createDownload: (magnet, signal) =>
-    request('/download-api/torrents', { method: 'POST', body: { magnet }, signal }),
+  // Add a torrent from a magnet URI or an http(s) .torrent URL.
+  // When autoStart is true all files download immediately; when false (default)
+  // files are added paused and require selectFiles to start.
+  // Returns { hash, name, files: [{ index, name, size }] }.
+  createDownload: (link, autoStart = false, signal) =>
+    request('/download-api/torrents', { method: 'POST', body: { link, autoStart }, signal }),
 
   // Promotes the given file indices to normal download priority. Additive:
   // does not affect files already selected.
