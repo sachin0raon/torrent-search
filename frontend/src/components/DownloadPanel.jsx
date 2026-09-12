@@ -34,7 +34,7 @@ export default function DownloadPanel({ magnet }) {
     setLoading(true);
     setError('');
     downloader
-      .createDownload(magnet, controller.signal)
+      .createDownload(magnet, false, controller.signal)
       .then((t) => {
         if (!active) return;
         setTorrent(t);

@@ -821,6 +821,94 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
   gap: 12px;
 }
 
+/* ---- Add Torrent bar ---- */
+.add-torrent-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.add-torrent-toggle {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--hairline);
+  color: var(--fg);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.add-torrent-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--hairline-strong);
+}
+.add-torrent-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+.add-torrent-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: 4px 4px 4px 12px;
+  transition: border-color 0.2s;
+}
+.add-torrent-input-row:focus-within {
+  border-color: var(--accent);
+}
+.add-torrent-icon {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.add-torrent-input {
+  flex: 1;
+  min-width: 0;
+  border: none !important;
+  background: transparent !important;
+  padding: 8px 0;
+  font-size: 13px;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.add-torrent-input:focus {
+  outline: none;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.add-torrent-submit {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.add-torrent-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.add-torrent-submit:not(:disabled):hover {
+  opacity: 0.85;
+}
+
 /* ---- Disk space card ---- */
 .disk-space-card {
   background: var(--surface);

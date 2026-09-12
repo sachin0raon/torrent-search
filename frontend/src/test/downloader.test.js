@@ -19,14 +19,24 @@ describe('downloader api', () => {
     expect(s.enabled).toBe(true);
   });
 
-  it('POSTs the magnet to create a download', async () => {
+  it('POSTs the magnet link to create a download (autoStart defaults to false)', async () => {
     global.fetch = mockFetch(200, { hash: 'abc', name: 'M', files: [] });
     const info = await downloader.createDownload('magnet:?xt=1');
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/download-api/torrents');
     expect(opts.method).toBe('POST');
-    expect(JSON.parse(opts.body)).toEqual({ magnet: 'magnet:?xt=1' });
+    expect(JSON.parse(opts.body)).toEqual({ link: 'magnet:?xt=1', autoStart: false });
     expect(info.hash).toBe('abc');
+  });
+
+  it('POSTs a .torrent URL with autoStart=true to create a download', async () => {
+    global.fetch = mockFetch(200, { hash: 'def', name: 'M2', files: [] });
+    const info = await downloader.createDownload('https://example.com/movie.torrent', true);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/download-api/torrents');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ link: 'https://example.com/movie.torrent', autoStart: true });
+    expect(info.hash).toBe('def');
   });
 
   it('POSTs selected file indices', async () => {

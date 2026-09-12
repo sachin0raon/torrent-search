@@ -65,7 +65,7 @@ func TestDownloadManager_AddTorrent_ZerosAllPrioritiesOnceReady(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	info, err := m.AddTorrent(ctx, "magnet:?xt=urn:btih:"+hash, "client-1")
+	info, err := m.AddTorrent(ctx, "magnet:?xt=urn:btih:"+hash, "client-1", false)
 	if err != nil {
 		t.Fatalf("AddTorrent: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestDownloadManager_AddTorrent_AlreadyTrackedSkipsReAdd(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	info, err := m.AddTorrent(ctx, "magnet:?xt=urn:btih:"+hash, "client-2")
+	info, err := m.AddTorrent(ctx, "magnet:?xt=urn:btih:"+hash, "client-2", false)
 	if err != nil {
 		t.Fatalf("AddTorrent: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestDownloadManager_AddTorrent_MetadataTimeout(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	_, err := m.AddTorrent(ctx, "magnet:?xt=urn:btih:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "")
+	_, err := m.AddTorrent(ctx, "magnet:?xt=urn:btih:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "", false)
 	if !errors.Is(err, ErrDownloadMetadataTimeout) {
 		t.Fatalf("expected ErrDownloadMetadataTimeout, got %v", err)
 	}
@@ -152,7 +152,7 @@ func TestDownloadManager_AddTorrent_MetadataTimeout(t *testing.T) {
 func TestDownloadManager_AddTorrent_InvalidMagnet(t *testing.T) {
 	fake := newFakeQbtAPI()
 	m := newTestDownloadManager(t, fake)
-	_, err := m.AddTorrent(context.Background(), "magnet:?dn=no-btih", "")
+	_, err := m.AddTorrent(context.Background(), "magnet:?dn=no-btih", "", false)
 	if !errors.Is(err, ErrDownloadInvalidMagnet) {
 		t.Fatalf("expected ErrDownloadInvalidMagnet, got %v", err)
 	}
