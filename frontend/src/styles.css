@@ -1107,6 +1107,7 @@ a.topic-link:hover .ext-icon { color: #a9bcff; transform: translate(1px, -1px); 
 .auth-dropdown a {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 9px;
   width: 100%;
   min-height: 38px;
@@ -1278,6 +1279,12 @@ button.danger { color: #ffb3b3; border-color: rgba(255, 157, 157, 0.35); }
 .admin-gate h1 { font-family: 'Space Grotesk', sans-serif; }
 .admin-gate p { color: var(--muted); }
 .admin-gate-actions { display: flex; justify-content: center; align-items: center; gap: 16px; }
+
+/* The fixed header (settings + auth controls) can overlap the centered hero
+   eyebrow below ~820px, so push the hero clear of it on phones and tablets. */
+@media (max-width: 820px) {
+  .hero { padding-top: 96px; }
+}
 
 @media (max-width: 640px) {
   .auth-username { display: none; }

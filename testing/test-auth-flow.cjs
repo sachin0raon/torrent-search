@@ -254,6 +254,24 @@ async function main() {
     await page.getByRole('button', { name: 'Sign up', exact: true }).waitFor();
     await shot('01-anonymous-home');
 
+    log('Mobile hero clears the fixed header');
+    const mobile = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const mobilePage = await mobile.newPage();
+    await mobilePage.goto(BASE, { waitUntil: 'networkidle' });
+    const badgeBox = await mobilePage.locator('.eyebrow').boundingBox();
+    const headerBox = await mobilePage.locator('header.app-header').boundingBox();
+    assert.ok(badgeBox && headerBox, 'hero badge and header must render');
+    assert.ok(
+      badgeBox.y >= headerBox.y + headerBox.height,
+      `hero badge (y=${badgeBox.y}) overlaps the header (bottom=${headerBox.y + headerBox.height})`,
+    );
+    await mobilePage.screenshot({
+      path: path.join(SHOTS, '01b-mobile-home.png'),
+      fullPage: true,
+    });
+    console.log(`screenshot: ${path.join(SHOTS, '01b-mobile-home.png')}`);
+    await mobile.close();
+
     log('Anonymous search + gating');
     await openSearchResult();
     const row = page.locator('.result-row').first();
@@ -312,6 +330,12 @@ async function main() {
     await page.getByRole('heading', { name: 'User management' }).waitFor();
     await page.getByText(USER, { exact: true }).first().waitFor();
     await shot('05-admin-pending');
+
+    // Capture the open account menu (all three items) to check item alignment.
+    await page.locator('.auth-user-btn').click();
+    await page.getByRole('menuitem', { name: /Admin panel/ }).waitFor();
+    await shot('05a-account-menu');
+    await page.keyboard.press('Escape');
 
     await page
       .locator('.admin-user-card', { hasText: USER })
