@@ -83,39 +83,10 @@ seed_admin() {
     GENERATED_ADMIN_PASS=1
   fi
   log "seeding admin '${ADMIN_USER}'"
-  docker exec -i \
-    -e "ADMIN_SEED_USER=${ADMIN_USER}" \
-    -e "ADMIN_SEED_PASSWORD=${ADMIN_PASS}" \
-    "$CONTAINER_NAME" \
-    python - <<'PY'
-import os
-
-from app.auth.db import connect, now_iso
-from app.auth.security import hash_password
-
-username = os.environ["ADMIN_SEED_USER"]
-password = os.environ["ADMIN_SEED_PASSWORD"]
-stamp = now_iso()
-conn = connect()
-try:
-    row = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
-    if row:
-        conn.execute(
-            "UPDATE users SET password_hash = ?, role = 'admin', status = 'active' WHERE id = ?",
-            (hash_password(password), row["id"]),
-        )
-        print("updated existing admin")
-    else:
-        conn.execute(
-            "INSERT INTO users (username, password_hash, role, status, created_at, approved_at)"
-            " VALUES (?, ?, 'admin', 'active', ?, ?)",
-            (username, hash_password(password), stamp, stamp),
-        )
-        print("created admin")
-    conn.commit()
-finally:
-    conn.close()
-PY
+  printf '%s\n' "$ADMIN_PASS" |
+    docker exec -i "$CONTAINER_NAME" \
+      python -m app.auth.cli insert-admin \
+      --username "$ADMIN_USER" --password-stdin --update
 }
 
 if [[ "$PROVISION" == "1" ]]; then

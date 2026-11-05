@@ -128,21 +128,38 @@ this only covers development or other cross-origin clients.
 
 ## Create the first admin
 
-Generate an Argon2id hash:
+`insert-admin` creates an active admin directly in the database. It initializes
+the schema if needed, hashes the password with Argon2id, and uses the same
+`AUTH_DB_PATH` as the app. Locally (the password is prompted twice, no echo):
 
 ```bash
 cd backend
-.venv/bin/python -m app.auth.cli hash-password
+.venv/bin/python -m app.auth.cli insert-admin --username admin
 ```
 
-Insert the admin, replacing `<hash>` with the printed value:
+In Docker, run it inside the container so the container's `AUTH_DB_PATH` applies:
 
-```sql
-INSERT INTO users (username, password_hash, role, status, created_at)
-VALUES ('admin', '<hash>', 'admin', 'active', datetime('now'));
+```bash
+docker compose exec app python -m app.auth.cli insert-admin --username admin
 ```
 
-Run this against `AUTH_DB_PATH` (inside Docker: `/data/auth.db`).
+If the admin already exists, pass `--update` to set a new password and revoke
+that admin's sessions. The command refuses to promote an existing normal user:
+
+```bash
+docker compose exec app python -m app.auth.cli insert-admin --username admin --update
+```
+
+For scripts, read the password from stdin so it does not appear in shell history
+or the process list:
+
+```bash
+printf '%s\n' "$ADMIN_PASSWORD" | \
+  python -m app.auth.cli insert-admin --username admin --password-stdin --update
+```
+
+The old two-step flow is still available: `hash-password` prints an Argon2id
+hash that you insert manually with SQL.
 
 ## Accepted risks
 

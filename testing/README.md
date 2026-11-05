@@ -61,9 +61,12 @@ If you need to seed one manually (local non-Docker backend):
 
 ```bash
 cd backend
-python -m app.auth.cli hash-password --password 'your-admin-password'
-# then insert with role='admin', status='active' — see docs/AUTH.md
+python -m app.auth.cli insert-admin --username admin
+# prompts for the password; add --update to reset an existing admin
 ```
+
+See [`docs/AUTH.md`](../docs/AUTH.md) for the Docker form and the
+`--password-stdin` scripting option.
 
 ## Configuration
 
