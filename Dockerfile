@@ -51,6 +51,8 @@ ENV PATH="/opt/venv/bin:$PATH" \
     LOG_LEVEL=info \
     STATIC_DIR=/app/static \
     CONFIG_JSON_PATH=/data/config.json \
+    AUTH_DB_PATH=/data/auth.db \
+    STREAMER_BASE_URL=http://127.0.0.1:8001 \
     STREAM_DOWNLOAD_DIR=/downloads \
     STREAM_LISTEN_ADDR=127.0.0.1:8001
 

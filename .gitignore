@@ -2,6 +2,10 @@
 backend/.env
 .env
 backend/config.json
+# Local auth SQLite DB (users, sessions, signing key).
+backend/auth.db
+backend/auth.db-wal
+backend/auth.db-shm
 
 # ---- Python (backend) ----
 .venv/

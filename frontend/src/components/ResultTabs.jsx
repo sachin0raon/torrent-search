@@ -9,6 +9,7 @@ import ForumTopicRow from './ForumTopicRow.jsx';
 import X1337Row from './X1337Row.jsx';
 import { useDownloadsEnabled } from '../downloadCapabilityContext.jsx';
 import { useStreamingEnabled } from '../streamingCapabilityContext.jsx';
+import { useAuth } from '../auth/AuthContext.jsx';
 import { staggerContainer, staggerItem, collapsePanel } from '../motion.js';
 
 // Torrent sources share row shapes; Forum and 1337x maintain dedicated rows.
@@ -76,12 +77,24 @@ function TorrentRow({ item }) {
   const [downloadOpen, setDownloadOpen] = useState(false);
   const downloadsEnabled = useDownloadsEnabled();
   const streamingEnabled = useStreamingEnabled();
+  const { available: authAvailable, ready: authReady, user, openAuth } = useAuth();
+
+  function allowAction() {
+    if (!authAvailable || user) return true;
+    // Wait out the initial session probe so a logged-in user is not asked
+    // to log in during the first render.
+    if (!authReady) return false;
+    openAuth('login', 'Log in to stream or download.');
+    return false;
+  }
 
   function toggleStream() {
+    if (!allowAction()) return;
     setDownloadOpen(false);
     setStreamOpen((o) => !o);
   }
   function toggleDownload() {
+    if (!allowAction()) return;
     setStreamOpen(false);
     setDownloadOpen((o) => !o);
   }

@@ -2,11 +2,18 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, ChevronDown, ChevronUp, Trash2, PlayCircle, Download, Pause, Play, HardDrive, Plus, Link, Loader } from 'lucide-react';
 import { downloader } from '../api/downloader.js';
-import { buildDownloadUrl, playerLinks, baseName, isMediaFile } from '../playerLinks.js';
+import {
+  buildDownloadUrl,
+  playerLinks,
+  baseName,
+  isMediaFile,
+  withDownloadFlag,
+} from '../playerLinks.js';
 import { fadeUp, spring, collapsePanel } from '../motion.js';
 import { formatSize } from '../formatSize.js';
 import CopyButton from './CopyButton.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
+import { useStreamToken } from '../auth/useStreamToken.js';
 
 const POLL_INTERVAL = 5000;
 
@@ -132,9 +139,9 @@ function formatEta(seconds) {
   return `${d}d ${h % 24}h`;
 }
 
-function DownloadFileRow({ hash, file }) {
+function DownloadFileRow({ hash, file, token }) {
   const name = baseName(file.name);
-  const url = buildDownloadUrl(hash, file.index, name);
+  const url = buildDownloadUrl(hash, file.index, name, token);
   const links = isMediaFile(name) ? playerLinks(url, name) : [];
   const pct = file.size > 0 ? Math.min(100, Math.round((file.downloaded / file.size) * 100)) : 0;
   return (
@@ -155,7 +162,7 @@ function DownloadFileRow({ hash, file }) {
             </button>
           </a>
         ))}
-        <a href={`${url}?dl=1`}>
+        <a href={withDownloadFlag(url)}>
           <button className="player-btn icon-only" title="Download file" aria-label="Download file">
             <Download size={14} />
           </button>
@@ -186,6 +193,13 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete, onRefresh }) 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const confirmTimerRef = useRef(null);
+  const {
+    token,
+    loading: tokenLoading,
+    error: tokenError,
+    required: tokenRequired,
+    reload: reloadToken,
+  } = useStreamToken('download', expanded ? hash : null);
   // Spread rather than swap outright: any field detail actually carries
   // (the normal case — Get always returns the full torrent-level shape)
   // wins, but a field it happens to omit falls back to entry's last-known
@@ -311,10 +325,20 @@ const DownloadCard = memo(function DownloadCard({ entry, onDelete, onRefresh }) 
           <motion.div key="files" {...collapsePanel} style={{ overflow: 'hidden' }}>
             <div className="stats-file-list" style={{ marginTop: 10 }}>
               {loadingFiles ? <div className="spinner">Loading files…</div> : null}
+              {tokenError ? (
+                <ErrorBanner message={tokenError} onDismiss={reloadToken} />
+              ) : null}
               {files && files.length === 0 && !loadingFiles ? (
                 <div className="stats-empty-files">No files selected yet.</div>
               ) : null}
-              {files ? files.map((f) => <DownloadFileRow key={f.index} hash={hash} file={f} />) : null}
+              {tokenRequired && tokenLoading && files?.length ? (
+                <div className="spinner">Preparing file links…</div>
+              ) : null}
+              {files && !(tokenRequired && (tokenLoading || tokenError))
+                ? files.map((f) => (
+                    <DownloadFileRow key={f.index} hash={hash} file={f} token={token} />
+                  ))
+                : null}
             </div>
           </motion.div>
         ) : null}

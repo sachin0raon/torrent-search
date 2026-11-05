@@ -8,6 +8,7 @@ import DownloadPanel from './DownloadPanel.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
 import { useDownloadsEnabled } from '../downloadCapabilityContext.jsx';
 import { useStreamingEnabled } from '../streamingCapabilityContext.jsx';
+import { useAuth } from '../auth/AuthContext.jsx';
 import { collapsePanel } from '../motion.js';
 
 // One link row inside an expanded forum topic. Owns its own stream-open state.
@@ -16,12 +17,24 @@ function ForumLinkRow({ link }) {
   const [downloadOpen, setDownloadOpen] = useState(false);
   const downloadsEnabled = useDownloadsEnabled();
   const streamingEnabled = useStreamingEnabled();
+  const { available: authAvailable, ready: authReady, user, openAuth } = useAuth();
+
+  function allowAction() {
+    if (!authAvailable || user) return true;
+    // Wait out the initial session probe so a logged-in user is not asked
+    // to log in during the first render.
+    if (!authReady) return false;
+    openAuth('login', 'Log in to stream or download.');
+    return false;
+  }
 
   function toggleStream() {
+    if (!allowAction()) return;
     setDownloadOpen(false);
     setStreamOpen((o) => !o);
   }
   function toggleDownload() {
+    if (!allowAction()) return;
     setStreamOpen(false);
     setDownloadOpen((o) => !o);
   }

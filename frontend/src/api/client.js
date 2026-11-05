@@ -1,8 +1,14 @@
 // Thin fetch wrapper for the backend API. All calls are relative (/api/*) and
 // proxied to the FastAPI backend by Vite in dev.
+import { getCsrfToken } from '../auth/csrf.js';
 
-async function request(path, { method = 'GET', body, signal } = {}) {
+const NO_AUTH_EVENT = ['/api/auth/login', '/api/auth/register', '/api/auth/me'];
+
+export async function request(path, { method = 'GET', body, signal } = {}) {
   const opts = { method, signal, headers: {} };
+  if (!['GET', 'HEAD'].includes(method) && getCsrfToken()) {
+    opts.headers['X-CSRF-Token'] = getCsrfToken();
+  }
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
@@ -16,7 +22,12 @@ async function request(path, { method = 'GET', body, signal } = {}) {
   }
   if (!res.ok) {
     const detail = (data && data.detail) || `Request failed (${res.status})`;
-    throw new Error(detail);
+    const err = new Error(detail);
+    err.status = res.status;
+    if (res.status === 401 && !NO_AUTH_EVENT.includes(path.split('?')[0])) {
+      window.dispatchEvent(new Event('auth:unauthorized'));
+    }
+    throw err;
   }
   return data;
 }

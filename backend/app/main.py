@@ -12,6 +12,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.auth.config import auth_db_path
+from app.auth.db import init_db
 from app.config import (
     CORS_ORIGINS,
     OUTBOUND_TIMEOUT_SECONDS,
@@ -19,7 +21,18 @@ from app.config import (
     get_forum_base_url,
     get_forum_probe_settings,
 )
-from app.routers import comet, discover, forum, meteor, search, settings, torrentio, x1337
+from app.routers import (
+    admin,
+    auth,
+    comet,
+    discover,
+    forum,
+    meteor,
+    search,
+    settings,
+    torrentio,
+    x1337,
+)
 from app.services.scheduler import create_scheduler
 
 
@@ -59,6 +72,8 @@ _static = _static_dir()
 
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI):
+    init_db()
+    log.info("Auth database ready at %s", auth_db_path())
     base_url, source = get_forum_base_url()
     log.info(
         "Startup: forum_base_url=%s (source=%s), static_serving=%s",
@@ -108,12 +123,14 @@ app = FastAPI(title="Torrent Search Aggregator", version="0.1.0", lifespan=lifes
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_credentials=False,
-    allow_methods=["GET", "PUT"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
 # API routers are registered before the static mount so /api/* always wins.
+app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(search.router)
 app.include_router(torrentio.router)
 app.include_router(comet.router)

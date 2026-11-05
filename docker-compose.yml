@@ -19,6 +19,13 @@ services:
       FORUM_BASE_URL: ${FORUM_BASE_URL:-}
       # Application log verbosity (debug | info | warning | error).
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Authentication DB (users, sessions, signing key) in the /data volume.
+      AUTH_DB_PATH: /data/auth.db
+      AUTH_SESSION_TTL_SECONDS: ${AUTH_SESSION_TTL_SECONDS:-604800}
+      AUTH_STREAM_TOKEN_TTL_SECONDS: ${AUTH_STREAM_TOKEN_TTL_SECONDS:-43200}
+      # Unset = automatic from X-Forwarded-Proto. Set true behind HTTPS.
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-}
+      STREAMER_BASE_URL: http://127.0.0.1:8001
       # Retry policy for outbound API calls (retries 429/5xx + transport/timeout).
       EXTERNAL_MAX_ATTEMPTS: ${EXTERNAL_MAX_ATTEMPTS:-3}
       EXTERNAL_RETRY_DEADLINE: ${EXTERNAL_RETRY_DEADLINE:-15}

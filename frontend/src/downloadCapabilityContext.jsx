@@ -7,6 +7,10 @@ import { downloader } from './api/downloader.js';
 // ForumTopicRow, and the header button that opens DownloadsModal, don't need
 // it threaded through every intermediate component — same rationale as
 // sessionContext.jsx's SessionProvider for StatsModal's FAB visibility.
+//
+// /download-api/status is intentionally public (it only reports whether the
+// engine is configured) so logged-out users still see the Download action and
+// get the login prompt instead of the button silently disappearing.
 const DownloadCapabilityContext = createContext(false);
 
 export function DownloadCapabilityProvider({ children }) {

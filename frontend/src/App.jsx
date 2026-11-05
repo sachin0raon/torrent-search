@@ -13,6 +13,8 @@ import { getTorrentioMode } from './torrentioMode.js';
 import { getCometMode } from './cometMode.js';
 import { getMeteorMode } from './meteorMode.js';
 import { getActiveDiscoverBadge, setActiveDiscoverBadge } from './discoverSectionState.js';
+import { useAuth } from './auth/AuthContext.jsx';
+import AccountMenu from './components/AccountMenu.jsx';
 import SearchBar from './components/SearchBar.jsx';
 import DiscoverSection from './components/DiscoverSection.jsx';
 import TitleList from './components/TitleList.jsx';
@@ -62,7 +64,16 @@ export default function App() {
   const [discoverActive, setDiscoverActive] = useState(getActiveDiscoverBadge); // active Discover badge key, or null
   const [discoverActiveBeforeSelect, setDiscoverActiveBeforeSelect] = useState(null); // restored by "Change title"
   const { sessions } = useSessions();
+  const { user } = useAuth();
   const { resolution, language, setResolution, setLanguage } = useFilterState();
+
+  // Account-scoped downloads/streams disappear on logout; close their modals.
+  useEffect(() => {
+    if (!user) {
+      setShowDownloads(false);
+      setShowStats(false);
+    }
+  }, [user]);
 
   function toggleDiscoverBadge(key) {
     const next = discoverActive === key ? null : key;
@@ -322,6 +333,7 @@ export default function App() {
     <MotionConfig reducedMotion="user">
       <div className="container">
         <header className="app-header">
+          <AccountMenu />
           <button
             className="icon-btn"
             onClick={() => setShowSettings(true)}
@@ -467,7 +479,7 @@ export default function App() {
               </button>
             </a>
           ) : null}
-          {downloadsEnabled ? (
+          {downloadsEnabled && user ? (
             <button
               className="stats-fab icon-btn"
               onClick={() => setShowDownloads(true)}
@@ -477,7 +489,7 @@ export default function App() {
               <HardDriveDownload size={18} />
             </button>
           ) : null}
-          {streamingEnabled && (qbtActiveStreamsEnabled || sessions.size > 0) ? (
+          {streamingEnabled && user && (qbtActiveStreamsEnabled || sessions.size > 0) ? (
             <button
               className="stats-fab icon-btn"
               onClick={() => setShowStats(true)}

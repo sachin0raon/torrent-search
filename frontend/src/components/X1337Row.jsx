@@ -8,6 +8,7 @@ import DownloadPanel from './DownloadPanel.jsx';
 import ErrorBanner from './ErrorBanner.jsx';
 import { useDownloadsEnabled } from '../downloadCapabilityContext.jsx';
 import { useStreamingEnabled } from '../streamingCapabilityContext.jsx';
+import { useAuth } from '../auth/AuthContext.jsx';
 import { staggerItem, collapsePanel } from '../motion.js';
 
 export default function X1337Row({ item }) {
@@ -18,6 +19,16 @@ export default function X1337Row({ item }) {
   const [error, setError] = useState('');
   const downloadsEnabled = useDownloadsEnabled();
   const streamingEnabled = useStreamingEnabled();
+  const { available: authAvailable, ready: authReady, user, openAuth } = useAuth();
+
+  function allowAction() {
+    if (!authAvailable || user) return true;
+    // Wait out the initial session probe so a logged-in user is not asked
+    // to log in during the first render.
+    if (!authReady) return false;
+    openAuth('login', 'Log in to stream or download.');
+    return false;
+  }
 
   async function ensureMagnet() {
     if (magnet) return magnet;
@@ -39,6 +50,7 @@ export default function X1337Row({ item }) {
   }
 
   async function toggleStream() {
+    if (!allowAction()) return;
     if (streamOpen) {
       setStreamOpen(false);
       return;
@@ -51,6 +63,7 @@ export default function X1337Row({ item }) {
   }
 
   async function toggleDownload() {
+    if (!allowAction()) return;
     if (downloadOpen) {
       setDownloadOpen(false);
       return;

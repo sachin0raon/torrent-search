@@ -8,10 +8,11 @@ import CopyButton from './CopyButton.jsx';
 import { buildStreamUrl, playerLinks, baseName } from '../playerLinks.js';
 import { collapsePanel } from '../motion.js';
 import { formatSize } from '../formatSize.js';
+import { useStreamToken } from '../auth/useStreamToken.js';
 
 // Rendered only when the row is expanded — defers URL/link building until needed.
-function StreamableLinks({ session, file, name }) {
-  const url = buildStreamUrl(session.sessionId, file.index, name);
+function StreamableLinks({ session, file, name, token }) {
+  const url = buildStreamUrl(session.sessionId, file.index, name, token);
   const links = playerLinks(url, name);
   return (
     <div className="player-links">
@@ -25,12 +26,12 @@ function StreamableLinks({ session, file, name }) {
   );
 }
 
-function FileRow({ session, file }) {
+function FileRow({ session, file, token }) {
   const [expanded, setExpanded] = useState(false);
   const name = baseName(file.path);
 
   if (!file.streamable) {
-    const downloadUrl = buildStreamUrl(session.sessionId, file.index, name);
+    const downloadUrl = buildStreamUrl(session.sessionId, file.index, name, token);
     return (
       <div className="stream-file-row">
         <div className="stream-file-head">
@@ -59,7 +60,7 @@ function FileRow({ session, file }) {
       <AnimatePresence initial={false}>
         {expanded && (
           <motion.div key="links" {...collapsePanel} style={{ overflow: 'hidden' }}>
-            <StreamableLinks session={session} file={file} name={name} />
+            <StreamableLinks session={session} file={file} name={name} token={token} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -75,6 +76,13 @@ export default function StreamPanel({ magnet }) {
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const { register, unregister } = useSessions();
+  const {
+    token,
+    loading: tokenLoading,
+    error: tokenError,
+    required: tokenRequired,
+    reload: reloadToken,
+  } = useStreamToken('stream', session?.sessionId);
 
   useEffect(() => {
     let active = true;
@@ -117,11 +125,20 @@ export default function StreamPanel({ magnet }) {
             </>
           ) : !session ? (
             <button style={{ width: 'fit-content' }} onClick={() => setAttempt((a) => a + 1)}><RefreshCw size={14} />Retry</button>
+          ) : tokenError ? (
+            <ErrorBanner message={tokenError} onDismiss={reloadToken} />
+          ) : tokenRequired && tokenLoading ? (
+            <div className="spinner">Preparing player links…</div>
           ) : session.files.length === 0 ? (
             <div className="empty">No files in this torrent.</div>
           ) : (
             session.files.map((f) => (
-              <FileRow key={`${session.sessionId}-${f.index}`} session={session} file={f} />
+              <FileRow
+                key={`${session.sessionId}-${f.index}`}
+                session={session}
+                file={f}
+                token={token}
+              />
             ))
           )}
         </div>
